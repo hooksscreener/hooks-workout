@@ -19,7 +19,7 @@ const DEFAULT_EXERCISES = {
 const RANGE_PRESETS = [
   { key: "1w", label: "1W", days: 7 }, { key: "1m", label: "1M", days: 30 }, { key: "3m", label: "3M", days: 90 },
   { key: "6m", label: "6M", days: 182 }, { key: "8m", label: "8M", days: 243 }, { key: "10m", label: "10M", days: 304 },
-  { key: "1y", label: "1Y", days: 365 }, { key: "2y", label: "2Y", days: 730 },
+  { key: "1y", label: "1Y", days: 365 }, { key: "2y", label: "2Y", days: 730 }, { key: "all", label: "ALL", days: 36500 },
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
@@ -66,8 +66,8 @@ function CalendarPopup({ selectedDate, onSelect, onClose }) {
   );
 }
 
-const INK = "#121316";
-const CARD_INK = "#1c1d21";
+const INK = "var(--ink)";
+const CARD_INK = "var(--card)";
 const estE1RM = (weight, reps) => (reps > 0 ? Math.round(weight * (1 + reps / 30)) : weight);
 
 function SvgChart({ rows, series, mode, metric }) {
@@ -103,7 +103,7 @@ function SvgChart({ rows, series, mode, metric }) {
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + t * (H - padT - padB);
         const val = Math.round(max - t * (max - min));
-        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="#2b2d33" strokeWidth="1" /><text x={2} y={yy + 3} fontSize="9" fill="#84868c">{val}</text></g>;
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" /><text x={2} y={yy + 3} fontSize="9" fill="var(--mute)">{val}</text></g>;
       })}
       {series.map((s, si) => {
         const pts = [];
@@ -116,13 +116,13 @@ function SvgChart({ rows, series, mode, metric }) {
         });
         return <g key={s}><polyline points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />{dots}</g>;
       })}
-      {rows.map((r, i) => (i % xTickEvery === 0 || i === n - 1) && <text key={i} x={x(i)} y={H - 6} fontSize="9" fill="#84868c" textAnchor="middle">{r.label}</text>)}
+      {rows.map((r, i) => (i % xTickEvery === 0 || i === n - 1) && <text key={i} x={x(i)} y={H - 6} fontSize="9" fill="var(--mute)" textAnchor="middle">{r.label}</text>)}
 
       {active && (
         <g>
-          <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="#2b2d33" />
-          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="#84868c">{active.title}</text>
-          {active.lines.map((l, i) => <text key={i} x={boxX + 8} y={boxY + 14 + (i + 1) * lineH} fontSize="10" fontWeight="600" fill="#ececea">{l}</text>)}
+          <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="var(--border)" />
+          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
+          {active.lines.map((l, i) => <text key={i} x={boxX + 8} y={boxY + 14 + (i + 1) * lineH} fontSize="10" fontWeight="600" fill="var(--chalk)">{l}</text>)}
         </g>
       )}
     </svg>
@@ -264,7 +264,57 @@ function TickerItem({ series }) {
   );
 }
 
+function PortfolioChart({ rows, color }) {
+  const [active, setActive] = useState(null);
+  const W = 340, H = 170, padL = 4, padR = 4, padT = 10, padB = 4;
+  if (rows.length < 2) return <div className="empty">Log more sessions across a few exercises to see this.</div>;
+  const vals = rows.map((r) => r.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const n = rows.length;
+  const x = (i) => padL + (i / (n - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - min) / range) * (H - padT - padB);
+
+  const showPoint = (i) => setActive({ x: x(i), y: y(rows[i].value), title: rows[i].label, value: rows[i].value });
+
+  const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
+  const areaPts = `${x(0)},${H} ${pts} ${x(n - 1)},${H}`;
+
+  const boxW = 90, boxH = 34;
+  let boxX = active ? Math.min(Math.max(active.x - boxW / 2, 2), W - boxW - 2) : 0;
+  let boxY = active ? Math.max(active.y - boxH - 10, 2) : 0;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 190 }} onClick={(e) => { if (e.target.tagName === "svg" || e.target.dataset.bg) setActive(null); }}>
+      <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
+      <polygon points={areaPts} fill={color} opacity="0.08" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {rows.map((r, i) => (
+        <circle key={i} cx={x(i)} cy={y(r.value)} r={10} fill="transparent" style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); showPoint(i); }} onMouseEnter={() => showPoint(i)} />
+      ))}
+      {active && (
+        <g>
+          <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill="var(--card)" stroke="var(--border)" />
+          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
+          <text x={boxX + 8} y={boxY + 27} fontSize="12" fontWeight="700" fill="var(--chalk)">{active.value}</text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
 export default function Home() {
+  useEffect(() => {
+    const applyTheme = () => {
+      const hour = new Date().getHours();
+      const isDay = hour >= 7 && hour < 19;
+      document.documentElement.dataset.theme = isDay ? "light" : "dark";
+    };
+    applyTheme();
+    const interval = setInterval(applyTheme, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [passcode, setPasscode] = useState(null);
   const [passInput, setPassInput] = useState("");
   const [authError, setAuthError] = useState(null);
@@ -276,7 +326,7 @@ export default function Home() {
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
-  const [view, setView] = useState("home");
+  const [view, setView] = useState("portfolio");
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [calendarOpen, setCalendarOpen] = useState(false);
 
@@ -409,6 +459,54 @@ export default function Home() {
     return list.slice(0, 12);
   }, [tickerScope, exercises, allExerciseNames, entriesByExercise]);
 
+  const [portfolioRange, setPortfolioRange] = useState("3m");
+  const portfolioSeries = useMemo(() => {
+    const perExercise = {};
+    entries.forEach((e) => {
+      perExercise[e.exercise] = perExercise[e.exercise] || {};
+      const cur = perExercise[e.exercise][e.date];
+      if (!cur || e.weight > cur.weight) perExercise[e.exercise][e.date] = e;
+    });
+    const exNames = Object.keys(perExercise).filter((ex) => Object.keys(perExercise[ex]).length >= 2);
+    if (exNames.length === 0) return { rows: [] };
+
+    const baseline = {};
+    exNames.forEach((ex) => {
+      const dates = Object.keys(perExercise[ex]).sort();
+      const firstEntry = perExercise[ex][dates[0]];
+      baseline[ex] = estE1RM(firstEntry.weight, firstEntry.reps);
+    });
+
+    const allDatesSet = new Set();
+    exNames.forEach((ex) => Object.keys(perExercise[ex]).forEach((d) => allDatesSet.add(d)));
+    const allDates = Array.from(allDatesSet).sort();
+
+    const lastKnown = {};
+    const rows = allDates.map((date) => {
+      let sum = 0, count = 0;
+      exNames.forEach((ex) => {
+        const entry = perExercise[ex][date];
+        if (entry) lastKnown[ex] = estE1RM(entry.weight, entry.reps);
+        if (lastKnown[ex] !== undefined) { sum += (lastKnown[ex] / baseline[ex]) * 100; count++; }
+      });
+      return { date, label: fmtDate(date), value: count ? Math.round((sum / count) * 10) / 10 : null };
+    }).filter((r) => r.value !== null);
+
+    return { rows, exerciseCount: exNames.length };
+  }, [entries]);
+
+  const portfolioCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === portfolioRange).days), [portfolioRange]);
+  const portfolioFiltered = useMemo(() => {
+    const rows = portfolioSeries.rows.filter((r) => r.date >= portfolioCutoff);
+    return rows.length ? rows : portfolioSeries.rows.slice(-2);
+  }, [portfolioSeries, portfolioCutoff]);
+  const portfolioChange = useMemo(() => {
+    if (portfolioFiltered.length < 2) return null;
+    const first = portfolioFiltered[0].value, last = portfolioFiltered[portfolioFiltered.length - 1].value;
+    const pct = Math.round(((last - first) / first) * 1000) / 10;
+    return { pct, up: last >= first, last };
+  }, [portfolioFiltered]);
+
   const rangeCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === chartRange).days), [chartRange]);
 
   const chartResult = useMemo(() => {
@@ -474,28 +572,47 @@ export default function Home() {
     const hist = entriesByExercise[recExercise];
     if (!hist || !hist.length) return { noData: true };
 
-    const mostRecentDate = hist[0].date;
-    const lastSession = hist.filter((e) => e.date === mostRecentDate).sort((a, b) => b.weight - a.weight);
-    const lastTop = lastSession[0];
-    const plateaued = plateauFlag(hist);
     const repLow = 8, repHigh = 12;
+    // Near-max singles/doubles/triples (reps < 5) are real lifts, but they're not a sane basis for
+    // prescribing an 8-12 rep working set — exclude them from "last top set" selection.
+    const workingSetHist = hist.filter((e) => e.reps >= 5);
 
-    let nextTopWeight = lastTop.weight;
-    let note = "";
-    if (lastTop.reps >= repHigh || plateaued) {
-      const bump = lastTop.weight >= 100 ? 10 : 5;
-      nextTopWeight = lastTop.weight + bump;
-      note = plateaued && lastTop.reps < repHigh
-        ? `Same top weight 3 sessions running — bumping ${bump} lbs to break the plateau.`
-        : `You hit ${lastTop.reps} reps last time (top of the 8–12 range) — adding ${bump} lbs.`;
-    } else if (lastTop.reps < repLow) {
-      note = `Last top set was ${lastTop.reps} reps, under the 8 rep floor — same weight, focus on hitting 8+.`;
+    let nextTopWeight, note, lastTop, lastSessionDate, lastSession, basedOnActualSets;
+
+    if (workingSetHist.length > 0) {
+      lastSessionDate = workingSetHist[0].date;
+      lastSession = workingSetHist.filter((e) => e.date === lastSessionDate).sort((a, b) => b.weight - a.weight);
+      lastTop = lastSession[0];
+      const plateaued = plateauFlag(workingSetHist);
+      nextTopWeight = lastTop.weight;
+
+      if (lastTop.reps >= repHigh || plateaued) {
+        const bump = lastTop.weight >= 100 ? 10 : 5;
+        nextTopWeight = lastTop.weight + bump;
+        note = plateaued && lastTop.reps < repHigh
+          ? `Same top weight 3 sessions running — bumping ${bump} lbs to break the plateau.`
+          : `You hit ${lastTop.reps} reps last time (top of the 8–12 range) — adding ${bump} lbs.`;
+      } else if (lastTop.reps < repLow) {
+        note = `Last working top set was ${lastTop.reps} reps, under the 8 rep floor — same weight, focus on hitting 8+.`;
+      } else {
+        note = `Last working top set: ${lastTop.weight} lbs × ${lastTop.reps}. Same weight — aim to add a rep or two before the next bump.`;
+      }
+      basedOnActualSets = lastSession.length >= 2;
     } else {
-      note = `Last top set: ${lastTop.weight} lbs × ${lastTop.reps}. Same weight — aim to add a rep or two before the next bump.`;
+      // Only heavy low-rep attempts on record for this exercise — estimate an 8-12 rep starting
+      // weight from the best tested max instead of prescribing the max weight itself.
+      const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
+      const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
+      nextTopWeight = roundTo5(e1rm / (1 + repLow / 30));
+      lastTop = bestEntry;
+      lastSessionDate = bestEntry.date;
+      lastSession = [bestEntry];
+      note = `Only low-rep attempts logged for this exercise (best: ${bestEntry.weight} lbs × ${bestEntry.reps}) — no 8–12 rep working set on record yet. This starting weight is back-calculated from your estimated max, so treat it as a first guess and adjust by feel.`;
+      basedOnActualSets = false;
     }
 
     let pcts;
-    if (lastSession.length >= 2) {
+    if (basedOnActualSets) {
       pcts = lastSession.map((e) => e.weight / lastTop.weight);
     } else {
       pcts = [1, 0.9, 0.85, 0.8, 0.75, 0.7];
@@ -508,7 +625,7 @@ export default function Home() {
       return { set: i + 1, weight: w };
     });
 
-    return { noData: false, lastTop, lastSessionDate: mostRecentDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets: lastSession.length >= 2 };
+    return { noData: false, lastTop, lastSessionDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets };
   }, [recExercise, recSets, entriesByExercise]);
 
   const [goalExercise, setGoalExercise] = useState(null);
@@ -605,7 +722,7 @@ export default function Home() {
         <div>
           <div className="eyebrow"><span className="dot">●</span> Hooks Workout</div>
           <button className="title-btn" onClick={() => { setShowWorkoutMenu((v) => !v); setShowMenu(false); }}>
-            {view === "home" ? activeWorkout?.name : view === "exercises" ? "Exercises" : view === "charts" ? "Progress" : view === "recommend" ? "Recommend" : view === "goal" ? "Goal Program" : view === "import" ? "Import" : "Export"}
+            {view === "portfolio" ? "Overall" : view === "home" ? activeWorkout?.name : view === "exercises" ? "Exercises" : view === "charts" ? "Progress" : view === "recommend" ? "Recommend" : view === "goal" ? "Goal Program" : view === "import" ? "Import" : "Export"}
             {view === "home" && <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>}
           </button>
         </div>
@@ -624,6 +741,7 @@ export default function Home() {
         )}
         {showMenu && (
           <div className="dropdown right">
+            <button className="item" style={{ color: view === "portfolio" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("portfolio"); setShowMenu(false); }}>Overall</button>
             <button className="item" style={{ color: view === "home" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("home"); setShowMenu(false); }}>Log a set</button>
             <button className="item" style={{ color: view === "exercises" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("exercises"); setShowMenu(false); }}>All exercises</button>
             <button className="item" style={{ color: view === "charts" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("charts"); setShowMenu(false); }}>Progress charts</button>
@@ -639,8 +757,30 @@ export default function Home() {
 
       {!loaded ? (
         <div className="empty">Loading your log…</div>
-      ) : view === "home" ? (
+      ) : view === "portfolio" ? (
         <>
+          <div className="portfolio-change">
+            {portfolioChange ? (
+              <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
+                {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
+              </span>
+            ) : <span className="cap">Not enough data yet</span>}
+            <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>
+          </div>
+
+          <PortfolioChart rows={portfolioFiltered} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} />
+
+          <div className="pills" style={{ marginTop: 10 }}>
+            {RANGE_PRESETS.map((r) => (
+              <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => setPortfolioRange(r.key)}>{r.label}</button>
+            ))}
+          </div>
+
+          <button className="log-set-row" onClick={() => setView("home")}>
+            <span>Log a set</span>
+            <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
+          </button>
+
           <div className="ticker-wrap">
             <button className="ticker-scope-btn" onClick={() => setTickerMenuOpen((v) => !v)}>
               {tickerScope === "ALL" ? "All Exercises" : workouts.find((w) => w.id === tickerScope)?.name} ▾
@@ -663,7 +803,10 @@ export default function Home() {
               </div>
             )}
           </div>
-
+        </>
+      ) : view === "home" ? (
+        <>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <div className="date-row">
             <button onClick={() => setSelectedDate((d) => shiftDate(d, -1))}>‹</button>
             <button className="date-pill" onClick={() => setCalendarOpen((v) => !v)}>{fmtDateFull(selectedDate)}</button>
@@ -717,7 +860,7 @@ export default function Home() {
         </>
       ) : view === "exercises" ? (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           {activeList.map((ex) => {
             const history = entriesByExercise[ex] || [];
             const best = history.reduce((m, e) => Math.max(m, e.weight), 0);
@@ -726,7 +869,7 @@ export default function Home() {
             return (
               <div key={ex} className="ex-card">
                 <button className="ex-head" onClick={() => setExpandedExercise(isOpen ? null : ex)}>
-                  <div className="badge" style={{ background: best ? "#26201a" : "#212226", border: `2px solid ${best ? "var(--iron)" : "var(--border)"}`, color: best ? "var(--iron)" : "var(--mute)" }}>{best || "—"}</div>
+                  <div className="badge" style={{ background: best ? "var(--badge-on)" : "var(--surface-3)", border: `2px solid ${best ? "var(--iron)" : "var(--border)"}`, color: best ? "var(--iron)" : "var(--mute)" }}>{best || "—"}</div>
                   <div style={{ flex: 1 }}>
                     <div className="ex-name">{ex}</div>
                     <div className="ex-meta">{history.length ? `${history.length} logged · last ${fmtDate(history[0].date)}` : "no sets logged yet"}</div>
@@ -751,7 +894,7 @@ export default function Home() {
         </>
       ) : view === "charts" ? (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <select className="scope" value={chartScope} onChange={(e) => setChartScope(e.target.value)}>
             <option value="ALL">All Workouts</option>
             {workouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -780,7 +923,7 @@ export default function Home() {
         </>
       ) : view === "recommend" ? (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <select className="scope" value={recExercise || ""} onChange={(e) => setRecExercise(e.target.value || null)}>
             <option value="">Select an exercise…</option>
             {allExerciseNames.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -824,7 +967,7 @@ export default function Home() {
         </>
       ) : view === "goal" ? (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <select className="scope" value={goalExercise || ""} onChange={(e) => { setGoalExercise(e.target.value || null); setGoalMaxTouched(false); }}>
             <option value="">Select an exercise…</option>
             {allExerciseNames.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -887,7 +1030,7 @@ export default function Home() {
         </>
       ) : view === "import" ? (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <div className="card">
             <div className="label-sm">One-time bulk import</div>
             <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
@@ -906,7 +1049,7 @@ export default function Home() {
         </>
       ) : (
         <>
-          <button className="back-btn" onClick={() => setView("home")}>← Back</button>
+          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <div className="card">
             <div className="label-sm">Full backup</div>
             <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
