@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 
 const LINE_COLORS = ["#ff5a1f", "#3aa0ff", "#7bd389", "#ffd166", "#c792ea", "#ff6ec7", "#5ee6d0", "#f4756b", "#a0d911", "#9a8c98"];
 
@@ -19,7 +19,7 @@ const DEFAULT_EXERCISES = {
 const RANGE_PRESETS = [
   { key: "1w", label: "1W", days: 7 }, { key: "1m", label: "1M", days: 30 }, { key: "3m", label: "3M", days: 90 },
   { key: "6m", label: "6M", days: 182 }, { key: "8m", label: "8M", days: 243 }, { key: "10m", label: "10M", days: 304 },
-  { key: "1y", label: "1Y", days: 365 }, { key: "2y", label: "2Y", days: 730 }, { key: "all", label: "ALL", days: 36500 },
+  { key: "1y", label: "1Y", days: 365 }, { key: "all", label: "ALL", days: 36500 },
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
@@ -146,6 +146,45 @@ function repsForPct(pct) {
   return 8;
 }
 const roundTo5 = (v) => Math.round(v / 5) * 5;
+
+function plateauFlag(history) {
+  const distinctDates = [...new Set(history.map((e) => e.date))];
+  if (distinctDates.length < 3) return false;
+  const tops = distinctDates.slice(0, 3).map((d) => Math.max(...history.filter((e) => e.date === d).map((e) => e.weight)));
+  return tops.every((t) => t === tops[0]);
+}
+
+// Prefer the last ~60 days of working-set data when there's enough of it, so a hot streak (or a
+// slump) isn't dragged down by months-old numbers. Falls back to full history when recent data is sparse.
+function pickWorkingBasis(hist) {
+  const workingSetHist = hist.filter((e) => e.reps >= 5).sort((a, b) => (a.date < b.date ? 1 : -1));
+  if (workingSetHist.length === 0) return { pool: [], recencyLimited: false };
+  const cutoff = shiftDate(todayISO(), -60);
+  const recent = workingSetHist.filter((e) => e.date >= cutoff);
+  if (recent.length >= 2) return { pool: recent, recencyLimited: true };
+  return { pool: workingSetHist, recencyLimited: false };
+}
+
+const REC_LOW = 8, REC_HIGH = 12;
+function quickRecommend(hist) {
+  if (!hist || !hist.length) return null;
+  const { pool } = pickWorkingBasis(hist);
+  if (pool.length > 0) {
+    const lastSessionDate = pool[0].date;
+    const lastSession = pool.filter((e) => e.date === lastSessionDate).sort((a, b) => b.weight - a.weight);
+    const lastTop = lastSession[0];
+    const plateaued = plateauFlag(pool);
+    const shouldBump = lastTop.reps >= REC_HIGH || plateaued;
+    const recWeight = shouldBump ? lastTop.weight + (lastTop.weight >= 100 ? 10 : 5) : lastTop.weight;
+    const recReps = shouldBump ? REC_LOW : Math.min(REC_HIGH, lastTop.reps + 1);
+    return { lastWeight: lastTop.weight, lastReps: lastTop.reps, recWeight, recReps, onlyMax: false };
+  }
+  const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
+  const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
+  const recWeight = roundTo5(e1rm / (1 + REC_LOW / 30));
+  return { lastWeight: bestEntry.weight, lastReps: bestEntry.reps, recWeight, recReps: REC_LOW, onlyMax: true };
+}
+
 
 const IMPORT_DATA = [
   // Front Squat (legsA)
@@ -276,7 +315,6 @@ function PortfolioChart({ rows, color }) {
   const y = (v) => padT + (1 - (v - min) / range) * (H - padT - padB);
 
   const showPoint = (i) => setActive({ x: x(i), y: y(rows[i].value), title: rows[i].label, value: rows[i].value });
-
   const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
   const areaPts = `${x(0)},${H} ${pts} ${x(n - 1)},${H}`;
 
@@ -296,7 +334,7 @@ function PortfolioChart({ rows, color }) {
         <g>
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill="var(--card)" stroke="var(--border)" />
           <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
-          <text x={boxX + 8} y={boxY + 27} fontSize="12" fontWeight="700" fill="var(--chalk)">{active.value}</text>
+          <text x={boxX + 8} y={boxY + 27} fontSize="12" fontWeight="700" fill="var(--chalk)">{active.value > 0 ? "+" : ""}{active.value}%</text>
         </g>
       )}
     </svg>
@@ -413,6 +451,13 @@ export default function Home() {
     persist({ workouts, exercises: { ...exercises, [workoutId]: [...list, trimmed] }, entries });
   };
 
+  const removeExerciseFromList = (name, workoutId) => {
+    const ok = confirm(`Remove "${name}" from this workout's list? Your logged history for it stays intact — it just won't show up here or in autocomplete anymore.`);
+    if (!ok) return;
+    const list = exercises[workoutId] || [];
+    persist({ workouts, exercises: { ...exercises, [workoutId]: list.filter((e) => e.toLowerCase() !== name.toLowerCase()) }, entries });
+  };
+
   const submitSet = () => {
     const exerciseName = form.exercise.trim();
     if (!exerciseName || !form.weight) return;
@@ -506,6 +551,33 @@ export default function Home() {
     const pct = Math.round(((last - first) / first) * 1000) / 10;
     return { pct, up: last >= first, last };
   }, [portfolioFiltered]);
+  // Rebase to "% change from the start of the selected range" — the only honest way to plot a
+  // single number when it's a composite across differently-scaled exercises.
+  const portfolioDisplayRows = useMemo(() => {
+    if (portfolioFiltered.length < 2) return [];
+    const first = portfolioFiltered[0].value;
+    return portfolioFiltered.map((r) => ({ date: r.date, label: r.label, value: Math.round(((r.value - first) / first) * 1000) / 10 }));
+  }, [portfolioFiltered]);
+
+  const tickerTrackRef = useRef(null);
+  const tickerPausedRef = useRef(false);
+  const tickerResumeTimeout = useRef(null);
+  useEffect(() => {
+    let rafId;
+    const step = () => {
+      const el = tickerTrackRef.current;
+      if (el && !tickerPausedRef.current && el.scrollWidth > el.clientWidth) {
+        el.scrollLeft += 0.6;
+        const half = el.scrollWidth / 2;
+        if (el.scrollLeft >= half) el.scrollLeft -= half;
+      }
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [tickerSeries.length]);
+  const pauseTicker = () => { tickerPausedRef.current = true; if (tickerResumeTimeout.current) clearTimeout(tickerResumeTimeout.current); };
+  const scheduleTickerResume = () => { tickerResumeTimeout.current = setTimeout(() => { tickerPausedRef.current = false; }, 2500); };
 
   const rangeCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === chartRange).days), [chartRange]);
 
@@ -557,13 +629,6 @@ export default function Home() {
     }
   }, [entries, chartScope, rangeCutoff, chartMetric, workouts]);
 
-  const plateauFlag = (history) => {
-    const distinctDates = [...new Set(history.map((e) => e.date))];
-    if (distinctDates.length < 3) return false;
-    const tops = distinctDates.slice(0, 3).map((d) => Math.max(...history.filter((e) => e.date === d).map((e) => e.weight)));
-    return tops.every((t) => t === tops[0]);
-  };
-
   const [recExercise, setRecExercise] = useState(null);
   const [recSets, setRecSets] = useState(3);
 
@@ -572,10 +637,8 @@ export default function Home() {
     const hist = entriesByExercise[recExercise];
     if (!hist || !hist.length) return { noData: true };
 
-    const repLow = 8, repHigh = 12;
-    // Near-max singles/doubles/triples (reps < 5) are real lifts, but they're not a sane basis for
-    // prescribing an 8-12 rep working set — exclude them from "last top set" selection.
-    const workingSetHist = hist.filter((e) => e.reps >= 5);
+    const repLow = REC_LOW, repHigh = REC_HIGH;
+    const { pool: workingSetHist, recencyLimited } = pickWorkingBasis(hist);
 
     let nextTopWeight, note, lastTop, lastSessionDate, lastSession, basedOnActualSets;
 
@@ -585,17 +648,18 @@ export default function Home() {
       lastTop = lastSession[0];
       const plateaued = plateauFlag(workingSetHist);
       nextTopWeight = lastTop.weight;
+      const recencyNote = recencyLimited ? " (based on your last ~2 months)" : "";
 
       if (lastTop.reps >= repHigh || plateaued) {
         const bump = lastTop.weight >= 100 ? 10 : 5;
         nextTopWeight = lastTop.weight + bump;
         note = plateaued && lastTop.reps < repHigh
-          ? `Same top weight 3 sessions running — bumping ${bump} lbs to break the plateau.`
-          : `You hit ${lastTop.reps} reps last time (top of the 8–12 range) — adding ${bump} lbs.`;
+          ? `Same top weight 3 sessions running${recencyNote} — bumping ${bump} lbs to break the plateau.`
+          : `You hit ${lastTop.reps} reps last time (top of the 8–12 range)${recencyNote} — adding ${bump} lbs.`;
       } else if (lastTop.reps < repLow) {
-        note = `Last working top set was ${lastTop.reps} reps, under the 8 rep floor — same weight, focus on hitting 8+.`;
+        note = `Last working top set was ${lastTop.reps} reps, under the 8 rep floor${recencyNote} — same weight, focus on hitting 8+.`;
       } else {
-        note = `Last working top set: ${lastTop.weight} lbs × ${lastTop.reps}. Same weight — aim to add a rep or two before the next bump.`;
+        note = `Last working top set: ${lastTop.weight} lbs × ${lastTop.reps}${recencyNote}. Same weight — aim to add a rep or two before the next bump.`;
       }
       basedOnActualSets = lastSession.length >= 2;
     } else {
@@ -759,28 +823,6 @@ export default function Home() {
         <div className="empty">Loading your log…</div>
       ) : view === "portfolio" ? (
         <>
-          <div className="portfolio-change">
-            {portfolioChange ? (
-              <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
-                {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
-              </span>
-            ) : <span className="cap">Not enough data yet</span>}
-            <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>
-          </div>
-
-          <PortfolioChart rows={portfolioFiltered} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} />
-
-          <div className="pills" style={{ marginTop: 10 }}>
-            {RANGE_PRESETS.map((r) => (
-              <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => setPortfolioRange(r.key)}>{r.label}</button>
-            ))}
-          </div>
-
-          <button className="log-set-row" onClick={() => setView("home")}>
-            <span>Log a set</span>
-            <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
-          </button>
-
           <div className="ticker-wrap">
             <button className="ticker-scope-btn" onClick={() => setTickerMenuOpen((v) => !v)}>
               {tickerScope === "ALL" ? "All Exercises" : workouts.find((w) => w.id === tickerScope)?.name} ▾
@@ -796,13 +838,71 @@ export default function Home() {
             {tickerSeries.length === 0 ? (
               <div className="ticker-empty">Log 3+ sessions of an exercise to see it here.</div>
             ) : (
-              <div className="ticker-track-outer">
-                <div className="ticker-track" style={{ animationDuration: `${tickerSeries.length * 4}s` }}>
+              <div
+                className="ticker-track-outer"
+                ref={tickerTrackRef}
+                onPointerDown={pauseTicker}
+                onPointerUp={scheduleTickerResume}
+                onPointerLeave={scheduleTickerResume}
+                onTouchStart={pauseTicker}
+                onTouchEnd={scheduleTickerResume}
+              >
+                <div className="ticker-track">
                   {[...tickerSeries, ...tickerSeries].map((s, i) => <TickerItem key={i} series={s} />)}
                 </div>
               </div>
             )}
           </div>
+
+          {tickerScope === "ALL" ? (
+            <>
+              <div className="portfolio-change">
+                {portfolioChange ? (
+                  <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
+                    {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
+                  </span>
+                ) : <span className="cap">Not enough data yet</span>}
+                <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>
+              </div>
+
+              <div className="chart-box">
+                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} />
+              </div>
+              <div className="axis-caption">% change in overall estimated strength vs. the start of this range</div>
+
+              <div className="pills">
+                {RANGE_PRESETS.map((r) => (
+                  <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => setPortfolioRange(r.key)}>{r.label}</button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ marginTop: 18 }}>
+              <div className="label-sm" style={{ marginBottom: 10 }}>{workouts.find((w) => w.id === tickerScope)?.name} — today's targets</div>
+              {(exercises[tickerScope] || []).map((ex) => {
+                const rec = quickRecommend(entriesByExercise[ex]);
+                return (
+                  <div key={ex} className="day-list-item">
+                    <div className="day-list-name">{ex}</div>
+                    {rec ? (
+                      <div className="day-list-rec">
+                        <div className="rec-weight">{rec.recWeight} <span style={{ fontSize: 12, color: "var(--mute)", fontWeight: 400 }}>lbs</span></div>
+                        <div className="rec-reps">aim for {rec.recReps}+ reps</div>
+                        <div className="rec-last">last: {rec.lastWeight} × {rec.lastReps}</div>
+                      </div>
+                    ) : (
+                      <div className="rec-reps" style={{ color: "var(--mute)" }}>no sets logged yet</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button className="log-set-row" onClick={() => setView("home")}>
+            <span>Log a set</span>
+            <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
+          </button>
         </>
       ) : view === "home" ? (
         <>
@@ -868,15 +968,22 @@ export default function Home() {
             const plateaued = plateauFlag(history);
             return (
               <div key={ex} className="ex-card">
-                <button className="ex-head" onClick={() => setExpandedExercise(isOpen ? null : ex)}>
+                <div className="ex-head" style={{ cursor: "pointer" }} onClick={() => setExpandedExercise(isOpen ? null : ex)}>
                   <div className="badge" style={{ background: best ? "var(--badge-on)" : "var(--surface-3)", border: `2px solid ${best ? "var(--iron)" : "var(--border)"}`, color: best ? "var(--iron)" : "var(--mute)" }}>{best || "—"}</div>
                   <div style={{ flex: 1 }}>
                     <div className="ex-name">{ex}</div>
                     <div className="ex-meta">{history.length ? `${history.length} logged · last ${fmtDate(history[0].date)}` : "no sets logged yet"}</div>
                     {plateaued && <div style={{ fontSize: 11, fontWeight: 700, color: "var(--iron)", marginTop: 3 }}>⚠ Same top weight 3 sessions running — consider adding weight</div>}
                   </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeExerciseFromList(ex, activeWorkoutId); }}
+                    style={{ background: "none", border: "none", color: "var(--mute)", padding: 4, flexShrink: 0 }}
+                    aria-label={`Remove ${ex}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" /></svg>
+                  </button>
                   <span style={{ color: "var(--mute)", transform: isOpen ? "rotate(180deg)" : "none", display: "inline-block" }}>▾</span>
-                </button>
+                </div>
                 {isOpen && history.length > 0 && (
                   <div className="ex-hist">
                     {history.slice(0, 8).map((e) => (
