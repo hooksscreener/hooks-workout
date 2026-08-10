@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 
-const LINE_COLORS = ["#ff5a1f", "#3aa0ff", "#7bd389", "#ffd166", "#c792ea", "#ff6ec7", "#5ee6d0", "#f4756b", "#a0d911", "#9a8c98"];
+const LINE_COLORS = ["#ff6600", "#00d4ff", "#ffb000", "#ff3b3b", "#7CFC00", "#c792ea", "#ff6ec7", "#5ee6d0", "#a0d911", "#9a8c98"];
 
 const DEFAULT_WORKOUTS = [
   { id: "push", name: "Push" },
@@ -84,11 +84,12 @@ function SvgChart({ rows, series, mode, metric }) {
 
   const showPoint = (i, s, si) => {
     const r = rows[i];
+    const color = LINE_COLORS[si % LINE_COLORS.length];
     if (mode === "exercise") {
-      setActive({ x: x(i), y: y(r[s]), title: r.label, lines: [`${s}`, `${r[s]}${metric === "e1rm" ? " est. 1RM" : " lbs"}${r[`${s}__r`] ? ` · ${r[`${s}__r`]} reps${r[`${s}__s`] > 1 ? ` × ${r[`${s}__s`]} sets` : ""}` : ""}`] });
+      setActive({ x: x(i), y: y(r[s]), title: r.label, color, lines: [`${s}`, `${r[s]}${metric === "e1rm" ? " est. 1RM" : " lbs"}${r[`${s}__r`] ? ` · ${r[`${s}__r`]} reps${r[`${s}__s`] > 1 ? ` × ${r[`${s}__s`]} sets` : ""}` : ""}`] });
     } else {
       const detail = r[`${s}__detail`] || [];
-      setActive({ x: x(i), y: y(r[s]), title: `${r.label} — ${s}`, lines: detail.map((d) => `${d.exercise}: ${d.weight} lbs × ${d.reps}${d.sets > 1 ? ` × ${d.sets}` : ""}`) });
+      setActive({ x: x(i), y: y(r[s]), title: `${r.label} — ${s}`, color, lines: detail.map((d) => `${d.exercise}: ${d.weight} lbs × ${d.reps}${d.sets > 1 ? ` × ${d.sets}` : ""}`) });
     }
   };
 
@@ -120,6 +121,8 @@ function SvgChart({ rows, series, mode, metric }) {
 
       {active && (
         <g>
+          <circle cx={active.x} cy={active.y} r={7} fill={active.color || "var(--iron)"} stroke="var(--ink)" strokeWidth="2.5" />
+          <circle cx={active.x} cy={active.y} r={11} fill="none" stroke={active.color || "var(--iron)"} strokeWidth="1.5" opacity="0.5" />
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="var(--border)" />
           <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
           {active.lines.map((l, i) => <text key={i} x={boxX + 8} y={boxY + 14 + (i + 1) * lineH} fontSize="10" fontWeight="600" fill="var(--chalk)">{l}</text>)}
@@ -332,6 +335,8 @@ function PortfolioChart({ rows, color }) {
       ))}
       {active && (
         <g>
+          <circle cx={active.x} cy={active.y} r={6} fill={color} stroke="var(--ink)" strokeWidth="2" />
+          <circle cx={active.x} cy={active.y} r={10} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5" />
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill="var(--card)" stroke="var(--border)" />
           <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
           <text x={boxX + 8} y={boxY + 27} fontSize="12" fontWeight="700" fill="var(--chalk)">{active.value > 0 ? "+" : ""}{active.value}%</text>
@@ -562,12 +567,15 @@ export default function Home() {
   const tickerTrackRef = useRef(null);
   const tickerPausedRef = useRef(false);
   const tickerResumeTimeout = useRef(null);
+  const tickerDraggingRef = useRef(false);
+  const tickerDragStartX = useRef(0);
+  const tickerDragStartScroll = useRef(0);
   useEffect(() => {
     let rafId;
     const step = () => {
       const el = tickerTrackRef.current;
       if (el && !tickerPausedRef.current && el.scrollWidth > el.clientWidth) {
-        el.scrollLeft += 0.6;
+        el.scrollLeft += 0.9;
         const half = el.scrollWidth / 2;
         if (el.scrollLeft >= half) el.scrollLeft -= half;
       }
@@ -578,6 +586,19 @@ export default function Home() {
   }, [tickerSeries.length]);
   const pauseTicker = () => { tickerPausedRef.current = true; if (tickerResumeTimeout.current) clearTimeout(tickerResumeTimeout.current); };
   const scheduleTickerResume = () => { tickerResumeTimeout.current = setTimeout(() => { tickerPausedRef.current = false; }, 2500); };
+  const tickerPointerDown = (e) => {
+    pauseTicker();
+    if (e.pointerType === "mouse") {
+      tickerDraggingRef.current = true;
+      tickerDragStartX.current = e.clientX;
+      tickerDragStartScroll.current = tickerTrackRef.current ? tickerTrackRef.current.scrollLeft : 0;
+    }
+  };
+  const tickerPointerMove = (e) => {
+    if (!tickerDraggingRef.current || e.pointerType !== "mouse" || !tickerTrackRef.current) return;
+    tickerTrackRef.current.scrollLeft = tickerDragStartScroll.current - (e.clientX - tickerDragStartX.current);
+  };
+  const tickerPointerUp = () => { tickerDraggingRef.current = false; scheduleTickerResume(); };
 
   const rangeCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === chartRange).days), [chartRange]);
 
@@ -771,7 +792,7 @@ export default function Home() {
       <div className="login-wrap">
         <div className="login-card">
           <div className="eyebrow"><span className="dot">●</span> Hooks Workout</div>
-          <div style={{ fontFamily: "Arial Black, Arial, sans-serif", fontSize: 24, fontWeight: 900, textTransform: "uppercase", marginTop: 6 }}>Enter Passcode</div>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 24, fontWeight: 700, textTransform: "uppercase", marginTop: 6 }}>Enter Passcode</div>
           {authError && <div className="warn" style={{ marginTop: 12 }}>{authError}</div>}
           <input type="password" placeholder="Passcode" value={passInput} onChange={(e) => setPassInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitPasscode()} />
           <button className="btn-iron" onClick={submitPasscode}>Unlock</button>
@@ -841,9 +862,11 @@ export default function Home() {
               <div
                 className="ticker-track-outer"
                 ref={tickerTrackRef}
-                onPointerDown={pauseTicker}
-                onPointerUp={scheduleTickerResume}
-                onPointerLeave={scheduleTickerResume}
+                style={{ cursor: "grab" }}
+                onPointerDown={tickerPointerDown}
+                onPointerMove={tickerPointerMove}
+                onPointerUp={tickerPointerUp}
+                onPointerLeave={tickerPointerUp}
                 onTouchStart={pauseTicker}
                 onTouchEnd={scheduleTickerResume}
               >
