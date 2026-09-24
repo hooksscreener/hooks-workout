@@ -6,15 +6,13 @@ const DEFAULT_WORKOUTS = [
   { id: "push", name: "Push" },
   { id: "pull", name: "Pull" },
   { id: "arms", name: "Arms" },
-  { id: "legsA", name: "Legs A" },
-  { id: "legsB", name: "Legs B" },
+  { id: "legsA", name: "Legs" },
 ];
 const DEFAULT_EXERCISES = {
   push: ["Bench Press", "Incline Barbell Press", "Decline Press / Dips", "Fly Machine", "Barbell Shoulder Press", "Cable Lateral Raise", "Push-Ups", "Dumbbell Bench Press", "Seated Dumbbell Shoulder Press", "Arnold Press", "Close-Grip Bench Press", "Machine Chest Press", "Front Raise", "Diamond Push-Ups"],
   pull: ["Pull-Ups", "Reverse Fly", "Hex Bar Shrugs", "Close-Grip Lat Pulldown", "Seated Cable Rows (V-Bar)", "T-Bar Rows", "Deadlift", "Barbell Rows", "Single-Arm Dumbbell Row", "Chin-Ups", "Face Pulls", "Straight-Arm Pulldown", "Rack Pulls"],
   arms: ["Preacher Curls (BB)", "Individual Cable Curls", "Hammer Preacher Curls", "Skull Crushers", "OH Tricep Extensions", "Rope Pushdown Dropset", "Barbell Curl", "Dumbbell Curl", "Hammer Curl", "Concentration Curl", "EZ-Bar Curl", "Cable Curl", "Overhead Cable Tricep Extension"],
-  legsA: ["Squats", "Leg Press", "Leg Curls", "Calf Raises", "Romanian Deadlift", "Lunges", "Bulgarian Split Squat", "Hip Thrust", "Standing Calf Raise"],
-  legsB: ["Pendulum Squat", "Seated Leg Press", "Leg Extensions", "Sus Machine", "Hack Squat", "Goblet Squat", "Glute Bridge", "Seated Calf Raise"],
+  legsA: ["Squats", "Leg Press", "Leg Curls", "Calf Raises", "Romanian Deadlift", "Lunges", "Bulgarian Split Squat", "Hip Thrust", "Standing Calf Raise", "Pendulum Squat", "Seated Leg Press", "Leg Extensions", "Sus Machine", "Hack Squat", "Goblet Squat", "Glute Bridge", "Seated Calf Raise"],
 };
 const RANGE_PRESETS = [
   { key: "1w", label: "1W", days: 7 }, { key: "1m", label: "1M", days: 30 }, { key: "3m", label: "3M", days: 90 },
@@ -169,23 +167,29 @@ function pickWorkingBasis(hist) {
 }
 
 const REC_LOW = 8, REC_HIGH = 12;
-function quickRecommend(hist) {
+function quickRecommend(hist, mode = "weight") {
   if (!hist || !hist.length) return null;
   const { pool } = pickWorkingBasis(hist);
   if (pool.length > 0) {
     const lastSessionDate = pool[0].date;
     const lastSession = pool.filter((e) => e.date === lastSessionDate).sort((a, b) => b.weight - a.weight);
     const lastTop = lastSession[0];
+    if (mode === "reps") {
+      // Hold the weight steady on purpose — the goal is climbing reps over time, not adding weight.
+      const recWeight = lastTop.weight;
+      const recReps = lastTop.reps + 1;
+      return { lastWeight: lastTop.weight, lastReps: lastTop.reps, recWeight, recReps, onlyMax: false, mode };
+    }
     const plateaued = plateauFlag(pool);
     const shouldBump = lastTop.reps >= REC_HIGH || plateaued;
     const recWeight = shouldBump ? lastTop.weight + (lastTop.weight >= 100 ? 10 : 5) : lastTop.weight;
     const recReps = shouldBump ? REC_LOW : Math.min(REC_HIGH, lastTop.reps + 1);
-    return { lastWeight: lastTop.weight, lastReps: lastTop.reps, recWeight, recReps, onlyMax: false };
+    return { lastWeight: lastTop.weight, lastReps: lastTop.reps, recWeight, recReps, onlyMax: false, mode };
   }
   const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
   const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
   const recWeight = roundTo5(e1rm / (1 + REC_LOW / 30));
-  return { lastWeight: bestEntry.weight, lastReps: bestEntry.reps, recWeight, recReps: REC_LOW, onlyMax: true };
+  return { lastWeight: bestEntry.weight, lastReps: bestEntry.reps, recWeight, recReps: REC_LOW, onlyMax: true, mode };
 }
 
 
@@ -260,8 +264,8 @@ const IMPORT_DATA = [
   // Dip Machine (push)
   { exercise: "Dip Machine", workoutId: "push", weight: 180, sets: 3, reps: 8, date: "2026-01-24" },
   { exercise: "Dip Machine", workoutId: "push", weight: 175, sets: 3, reps: 8, date: "2026-08-08" },
-  // Sus Machine (legsB)
-  { exercise: "Sus Machine", workoutId: "legsB", weight: 170, sets: 3, reps: 8, date: "2026-02-14" },
+  // Sus Machine (legs, merged)
+  { exercise: "Sus Machine", workoutId: "legsA", weight: 170, sets: 3, reps: 8, date: "2026-02-14" },
   // Dips (Weighted) (push)
   { exercise: "Dips (Weighted)", workoutId: "push", weight: 45, sets: 3, reps: 8, date: "2026-07-14" },
   // Standing Calf Raise (legsA)
@@ -290,14 +294,14 @@ function Sparkline({ points, color }) {
   return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ flexShrink: 0 }}><polyline points={coords} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function TickerItem({ series }) {
+function TickerItem({ series, onClick }) {
   const first = series.points[0].e1rm, last = series.points[series.points.length - 1].e1rm;
   const pctChange = first ? Math.round(((last - first) / first) * 100) : 0;
   const up = last >= first;
   const color = up ? "#22c55e" : "#ef4444";
   const latest = series.points[series.points.length - 1];
   return (
-    <div className="ticker-item">
+    <div className="ticker-item" onClick={onClick} style={{ cursor: "pointer" }}>
       <div className="ticker-name">{series.exercise}</div>
       <div className="ticker-value">{latest.weight}<span className="ticker-unit">× {latest.reps}</span></div>
       <Sparkline points={series.points} color={color} />
@@ -306,8 +310,18 @@ function TickerItem({ series }) {
   );
 }
 
-function PortfolioChart({ rows, color }) {
-  const [active, setActive] = useState(null);
+const NAV_ICON_PROPS = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+function IconHome({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
+function IconDumbbell({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color} style={{ transform: "rotate(45deg)" }}><path d="M6 7v10M18 7v10" /><path d="M2 10v4M22 10v4" /><path d="M6 12h12" strokeWidth="3" /></svg>; }
+function IconChart({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 20V4" /><path d="M4 20h16" /><path d="M7 16l4-5 3 3 5-7" /></svg>; }
+function IconBulb({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a6 6 0 00-4 10.5c.7.6 1 1.3 1 2.5h6c0-1.2.3-1.9 1-2.5A6 6 0 0012 2z" /></svg>; }
+function IconTarget({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" fill={color} /></svg>; }
+function IconBook({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" /><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /></svg>; }
+
+function PortfolioChart({ rows, color, onScrub }) {
+  const [activeIndex, setActiveIndex] = useState(null);
+  const svgRef = useRef(null);
+  const draggingRef = useRef(false);
   const W = 340, H = 170, padL = 4, padR = 4, padT = 10, padB = 4;
   if (rows.length < 2) return <div className="empty">Log more sessions across a few exercises to see this.</div>;
   const vals = rows.map((r) => r.value);
@@ -317,31 +331,147 @@ function PortfolioChart({ rows, color }) {
   const x = (i) => padL + (i / (n - 1)) * (W - padL - padR);
   const y = (v) => padT + (1 - (v - min) / range) * (H - padT - padB);
 
-  const showPoint = (i) => setActive({ x: x(i), y: y(rows[i].value), title: rows[i].label, value: rows[i].value });
+  const posToIndex = (clientX) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const relX = ((clientX - rect.left) / rect.width) * W;
+    let nearest = 0, minDist = Infinity;
+    rows.forEach((r, i) => { const d = Math.abs(x(i) - relX); if (d < minDist) { minDist = d; nearest = i; } });
+    return nearest;
+  };
+  const scrubTo = (clientX) => {
+    const idx = posToIndex(clientX);
+    if (idx === null) return;
+    setActiveIndex(idx);
+    if (onScrub) onScrub(rows[idx]);
+  };
+  const startScrub = (e) => { draggingRef.current = true; scrubTo(e.clientX); };
+  const moveScrub = (e) => { if (draggingRef.current) scrubTo(e.clientX); };
+  const endScrub = () => { draggingRef.current = false; };
+
   const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
   const areaPts = `${x(0)},${H} ${pts} ${x(n - 1)},${H}`;
-
-  const boxW = 90, boxH = 34;
-  let boxX = active ? Math.min(Math.max(active.x - boxW / 2, 2), W - boxW - 2) : 0;
-  let boxY = active ? Math.max(active.y - boxH - 10, 2) : 0;
+  const active = activeIndex !== null ? { x: x(activeIndex), y: y(rows[activeIndex].value) } : null;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 190 }} onClick={(e) => { if (e.target.tagName === "svg" || e.target.dataset.bg) setActive(null); }}>
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", height: 190, touchAction: "none", cursor: "crosshair" }}
+      onPointerDown={startScrub}
+      onPointerMove={moveScrub}
+      onPointerUp={endScrub}
+      onPointerLeave={endScrub}
+    >
       <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
-      <polygon points={areaPts} fill={color} opacity="0.08" />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {rows.map((r, i) => (
-        <circle key={i} cx={x(i)} cy={y(r.value)} r={10} fill="transparent" style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); showPoint(i); }} onMouseEnter={() => showPoint(i)} />
+      <defs>
+        <pattern id="portfolioDots" patternUnits="userSpaceOnUse" width="5" height="5">
+          <circle cx="1" cy="1" r="0.8" fill={color} />
+        </pattern>
+        <linearGradient id="portfolioFade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="white" stopOpacity="1" />
+          <stop offset="70%" stopColor="white" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="white" stopOpacity="0" />
+        </linearGradient>
+        <mask id="portfolioFadeMask">
+          <rect x="0" y="0" width={W} height={H} fill="url(#portfolioFade)" />
+        </mask>
+        <clipPath id="portfolioAreaClip">
+          <polygon points={areaPts} />
+        </clipPath>
+      </defs>
+      {[0.2, 0.4, 0.6, 0.8].map((t, i) => (
+        <line key={i} x1={padL} y1={padT + t * (H - padT - padB)} x2={W - padR} y2={padT + t * (H - padT - padB)} stroke="var(--border)" strokeWidth="1" opacity="0.5" />
       ))}
+      <g clipPath="url(#portfolioAreaClip)" mask="url(#portfolioFadeMask)">
+        <rect x="0" y="0" width={W} height={H} fill="url(#portfolioDots)" />
+      </g>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {active && (
         <g>
+          <line x1={active.x} y1={padT} x2={active.x} y2={H} stroke={color} strokeWidth="1" opacity="0.35" strokeDasharray="3,3" />
           <circle cx={active.x} cy={active.y} r={6} fill={color} stroke="var(--ink)" strokeWidth="2" />
           <circle cx={active.x} cy={active.y} r={10} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5" />
-          <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill="var(--card)" stroke="var(--border)" />
-          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
-          <text x={boxX + 8} y={boxY + 27} fontSize="12" fontWeight="700" fill="var(--chalk)">{active.value > 0 ? "+" : ""}{active.value}%</text>
         </g>
       )}
+    </svg>
+  );
+}
+
+function RadarChart({ data }) {
+  // data: [{ label, value }] — value is % growth, can be negative
+  const W = 320, H = 260, cx = 160, cy = 130, outerR = 90;
+  const n = data.length;
+  const vals = data.map((d) => d.value);
+  const minVal = Math.min(0, ...vals);
+  const maxVal = Math.max(...vals, 5);
+  const radius = (v) => ((v - minVal) / (maxVal - minVal || 1)) * outerR;
+  const angle = (i) => (i * 2 * Math.PI) / n - Math.PI / 2;
+  const pt = (i, r) => [cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))];
+
+  const ringLevels = [0.25, 0.5, 0.75, 1];
+  const dataPts = data.map((d, i) => pt(i, radius(d.value)));
+  const dataPath = dataPts.map((p) => p.join(",")).join(" ");
+  const zeroR = radius(0);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 260 }}>
+      {ringLevels.map((lvl, ri) => {
+        const ringPts = data.map((_, i) => pt(i, outerR * lvl).join(",")).join(" ");
+        return <polygon key={ri} points={ringPts} fill="none" stroke="var(--border)" strokeWidth="1" />;
+      })}
+      {data.map((d, i) => {
+        const [x, y] = pt(i, outerR);
+        return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--border)" strokeWidth="1" />;
+      })}
+      {zeroR > 0 && zeroR < outerR && (
+        <polygon points={data.map((_, i) => pt(i, zeroR).join(",")).join(" ")} fill="none" stroke="var(--mute)" strokeWidth="1" strokeDasharray="3,3" />
+      )}
+      <polygon points={dataPath} fill="var(--iron)" fillOpacity="0.2" stroke="var(--iron)" strokeWidth="2" strokeLinejoin="round" />
+      {dataPts.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="3.5" fill="var(--iron)" />)}
+      {data.map((d, i) => {
+        const [lx, ly] = pt(i, outerR + 22);
+        return <text key={i} x={lx} y={ly} fontSize="10" fontWeight="700" fill="var(--chalk)" textAnchor="middle" dominantBaseline="central">{d.label}</text>;
+      })}
+    </svg>
+  );
+}
+
+function VolumeBarChart({ weeks }) {
+  const W = 340, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
+  const max = Math.max(...weeks.map((w) => w.volume), 1);
+  const n = weeks.length;
+  const bw = (W - padL - padR) / n - 6;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
+      {[0.25, 0.5, 0.75, 1].map((t, i) => {
+        const yy = padT + (1 - t) * (H - padT - padB);
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--mute)">{Math.round((max * t) / 1000)}k</text></g>;
+      })}
+      {weeks.map((w, i) => {
+        const h = (w.volume / max) * (H - padT - padB);
+        const x = padL + i * ((W - padL - padR) / n) + 3;
+        return <g key={i}>
+          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--iron)" />
+          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--mute)" textAnchor="middle">{w.label}</text>
+        </g>;
+      })}
+    </svg>
+  );
+}
+
+function ConsistencyHeatmap({ weeks }) {
+  // weeks: [[{date, count}, ...7 days], ...]
+  const cell = 15, gap = 3;
+  const W = weeks.length * (cell + gap);
+  const H = 7 * (cell + gap);
+  const colorFor = (count) => (count === 0 ? "var(--border)" : count === 1 ? "#7a3a10" : count === 2 ? "#b5540f" : "var(--iron)");
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 130 }}>
+      {weeks.map((week, wi) => week.map((day, di) => (
+        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="3" fill={colorFor(day.count)} />
+      )))}
     </svg>
   );
 }
@@ -366,6 +496,8 @@ export default function Home() {
   const [workouts, setWorkouts] = useState(DEFAULT_WORKOUTS);
   const [exercises, setExercises] = useState(DEFAULT_EXERCISES);
   const [entries, setEntries] = useState([]);
+  const [restDays, setRestDays] = useState([]);
+  const [progressionMode, setProgressionMode] = useState("weight"); // "weight" | "reps"
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
@@ -377,13 +509,14 @@ export default function Home() {
   const [newWorkoutName, setNewWorkoutName] = useState("");
   const [showMenu, setShowMenu] = useState(false);
 
-  const [form, setForm] = useState({ exercise: "", weight: "", sets: "", reps: "" });
+  const [form, setForm] = useState({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false });
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addingExercise, setAddingExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState("");
   const [expandedExercise, setExpandedExercise] = useState(null);
 
   const [chartScope, setChartScope] = useState("ALL");
+  const [chartFocusExercise, setChartFocusExercise] = useState(null);
   const [chartRange, setChartRange] = useState("3m");
   const [chartMetric, setChartMetric] = useState("weight");
 
@@ -403,9 +536,34 @@ export default function Home() {
         return;
       }
       const data = await res.json();
-      setWorkouts(data.workouts || DEFAULT_WORKOUTS);
-      setExercises(data.exercises || DEFAULT_EXERCISES);
-      setEntries(data.entries || []);
+      let nextWorkouts = data.workouts || DEFAULT_WORKOUTS;
+      let nextExercises = data.exercises || DEFAULT_EXERCISES;
+      let nextEntries = data.entries || [];
+      const nextRestDays = data.restDays || [];
+      const nextProgressionMode = data.progressionMode || "weight";
+
+      // One-time migration: merge the old Legs A / Legs B split into a single "Legs" workout.
+      const hasLegsB = nextWorkouts.some((w) => w.id === "legsB");
+      if (hasLegsB) {
+        nextWorkouts = nextWorkouts
+          .filter((w) => w.id !== "legsB")
+          .map((w) => (w.id === "legsA" ? { ...w, name: "Legs" } : w));
+        const mergedList = [...(nextExercises.legsA || []), ...(nextExercises.legsB || [])];
+        const deduped = [];
+        mergedList.forEach((ex) => { if (!deduped.some((d) => d.toLowerCase() === ex.toLowerCase())) deduped.push(ex); });
+        nextExercises = { ...nextExercises, legsA: deduped };
+        delete nextExercises.legsB;
+        nextEntries = nextEntries.map((e) => (e.workoutId === "legsB" ? { ...e, workoutId: "legsA" } : e));
+        if (activeWorkoutId === "legsB") setActiveWorkoutId("legsA");
+        // Save the merge immediately so it only ever needs to run once.
+        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode });
+      }
+
+      setWorkouts(nextWorkouts);
+      setExercises(nextExercises);
+      setEntries(nextEntries);
+      setRestDays(nextRestDays);
+      setProgressionMode(nextProgressionMode);
       setLoaded(true);
       setAuthError(null);
     } catch {
@@ -415,6 +573,20 @@ export default function Home() {
 
   useEffect(() => { if (passcode) loadData(passcode); }, [passcode]);
 
+  // Quick-log entry point: a Home Screen bookmark or iOS Shortcut pointed at
+  // ?quicklog=Exercise+Name jumps straight to the log form with that exercise pre-filled.
+  useEffect(() => {
+    if (!loaded) return;
+    const params = new URLSearchParams(window.location.search);
+    const ql = params.get("quicklog");
+    if (ql) {
+      const home = findExerciseHome(ql);
+      if (home) setActiveWorkoutId(home);
+      setForm((f) => ({ ...f, exercise: ql }));
+      setView("home");
+    }
+  }, [loaded]);
+
   const submitPasscode = () => {
     if (!passInput.trim()) return;
     localStorage.setItem(PASSCODE_KEY, passInput.trim());
@@ -422,23 +594,44 @@ export default function Home() {
   };
 
   const persist = async (next) => {
-    setWorkouts(next.workouts); setExercises(next.exercises); setEntries(next.entries);
+    const payload = {
+      ...next,
+      restDays: next.restDays !== undefined ? next.restDays : restDays,
+      progressionMode: next.progressionMode !== undefined ? next.progressionMode : progressionMode,
+    };
+    setWorkouts(payload.workouts); setExercises(payload.exercises); setEntries(payload.entries); setRestDays(payload.restDays); setProgressionMode(payload.progressionMode);
     try {
-      const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(next) });
+      const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(payload) });
       setSaveError(res.ok ? null : "Couldn't save — try again.");
     } catch { setSaveError("Couldn't save — check your connection."); }
+  };
+
+  const setProgressionModeAndSave = (mode) => {
+    persist({ workouts, exercises, entries, restDays, progressionMode: mode });
+  };
+
+  const toggleRestDay = (date) => {
+    const next = restDays.includes(date) ? restDays.filter((d) => d !== date) : [...restDays, date];
+    persist({ workouts, exercises, entries, restDays: next });
   };
 
   const activeWorkout = workouts.find((w) => w.id === activeWorkoutId) || workouts[0];
   const activeList = exercises[activeWorkoutId] || [];
 
+  const allExerciseNames = useMemo(() => {
+    const set = new Set();
+    Object.values(exercises).forEach((list) => list.forEach((e) => set.add(e)));
+    entries.forEach((e) => set.add(e.exercise));
+    return Array.from(set).sort();
+  }, [exercises, entries]);
+
   const suggestions = useMemo(() => {
     const q = form.exercise.trim().toLowerCase();
     if (!q) return [];
-    const starts = activeList.filter((e) => e.toLowerCase().startsWith(q));
-    const contains = activeList.filter((e) => !e.toLowerCase().startsWith(q) && e.toLowerCase().includes(q));
+    const starts = allExerciseNames.filter((e) => e.toLowerCase().startsWith(q));
+    const contains = allExerciseNames.filter((e) => !e.toLowerCase().startsWith(q) && e.toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 6);
-  }, [form.exercise, activeList]);
+  }, [form.exercise, allExerciseNames]);
 
   const createWorkout = () => {
     const name = newWorkoutName.trim();
@@ -463,19 +656,33 @@ export default function Home() {
     persist({ workouts, exercises: { ...exercises, [workoutId]: list.filter((e) => e.toLowerCase() !== name.toLowerCase()) }, entries });
   };
 
+  // Which workout an exercise "lives in" is decided by where it's already listed, not by
+  // whichever tab happens to be open — so logging a Squat always files as Legs regardless
+  // of what you were last looking at.
+  const findExerciseHome = (name) => {
+    const lower = name.toLowerCase();
+    for (const w of workouts) {
+      if ((exercises[w.id] || []).some((e) => e.toLowerCase() === lower)) return w.id;
+    }
+    return null;
+  };
+
   const submitSet = () => {
     const exerciseName = form.exercise.trim();
     if (!exerciseName || !form.weight) return;
-    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: activeWorkoutId, exercise: exerciseName, weight: Number(form.weight), sets: form.sets ? Number(form.sets) : 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate };
-    const list = exercises[activeWorkoutId] || [];
-    const nextExercises = list.some((e) => e.toLowerCase() === exerciseName.toLowerCase()) ? exercises : { ...exercises, [activeWorkoutId]: [...list, exerciseName] };
+    const homeWorkoutId = findExerciseHome(exerciseName) || activeWorkoutId;
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: homeWorkoutId, exercise: exerciseName, weight: Number(form.weight), sets: form.sets ? Number(form.sets) : 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate, isWarmup: !!form.isWarmup };
+    const list = exercises[homeWorkoutId] || [];
+    const nextExercises = list.some((e) => e.toLowerCase() === exerciseName.toLowerCase()) ? exercises : { ...exercises, [homeWorkoutId]: [...list, exerciseName] };
     persist({ workouts, exercises: nextExercises, entries: [entry, ...entries] });
+    setForm((f) => ({ ...f, isWarmup: false }));
     setShowSuggestions(false);
   };
 
-  const clearForm = () => { setForm({ exercise: "", weight: "", sets: "", reps: "" }); setShowSuggestions(false); };
+  const clearForm = () => { setForm({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false }); setShowSuggestions(false); };
 
   const deleteEntry = (id) => persist({ workouts, exercises, entries: entries.filter((e) => e.id !== id) });
+  const toggleWarmup = (id) => persist({ workouts, exercises, entries: entries.map((e) => (e.id === id ? { ...e, isWarmup: !e.isWarmup } : e)) });
 
   const entriesByExercise = useMemo(() => {
     const map = {};
@@ -484,21 +691,27 @@ export default function Home() {
     return map;
   }, [entries]);
 
-  const todaysEntries = entries.filter((e) => e.date === selectedDate && e.workoutId === activeWorkoutId);
+  // Warm-up sets are real reps, but they're not a signal of strength — every recommendation,
+  // chart, and "best lift" calculation should ignore them so a light warm-up entry never gets
+  // mistaken for a real top set or a plateau.
+  const strengthEntries = useMemo(() => entries.filter((e) => !e.isWarmup), [entries]);
+  const entriesByExerciseStrength = useMemo(() => {
+    const map = {};
+    for (const e of strengthEntries) (map[e.exercise] = map[e.exercise] || []).push(e);
+    Object.values(map).forEach((l) => l.sort((a, b) => (a.date < b.date ? 1 : -1)));
+    return map;
+  }, [strengthEntries]);
 
-  const allExerciseNames = useMemo(() => {
-    const set = new Set();
-    Object.values(exercises).forEach((list) => list.forEach((e) => set.add(e)));
-    entries.forEach((e) => set.add(e.exercise));
-    return Array.from(set).sort();
-  }, [exercises, entries]);
+  // Today's log shows everything logged today, regardless of which workout tab is open —
+  // matches the fact that which workout a set belongs to no longer depends on the active tab.
+  const todaysEntries = entries.filter((e) => e.date === selectedDate);
 
   const [tickerScope, setTickerScope] = useState("ALL");
   const [tickerMenuOpen, setTickerMenuOpen] = useState(false);
   const tickerSeries = useMemo(() => {
     const scopeExercises = tickerScope === "ALL" ? allExerciseNames : (exercises[tickerScope] || []);
     const list = scopeExercises.map((ex) => {
-      const hist = entriesByExercise[ex] || [];
+      const hist = entriesByExerciseStrength[ex] || [];
       const byDate = {};
       hist.forEach((e) => { const cur = byDate[e.date]; if (!cur || e.weight > cur.weight) byDate[e.date] = e; });
       const dates = Object.keys(byDate).sort();
@@ -507,12 +720,113 @@ export default function Home() {
     }).filter((s) => s.points.length >= 3);
     list.sort((a, b) => b.points.length - a.points.length);
     return list.slice(0, 12);
-  }, [tickerScope, exercises, allExerciseNames, entriesByExercise]);
+  }, [tickerScope, exercises, allExerciseNames, entriesByExerciseStrength]);
 
   const [portfolioRange, setPortfolioRange] = useState("3m");
+  const [scrubPoint, setScrubPoint] = useState(null);
+
+  const radarData = useMemo(() => {
+    return workouts.map((w) => {
+      const exList = exercises[w.id] || [];
+      const perExercise = exList.map((ex) => {
+        const hist = (entriesByExerciseStrength[ex] || []).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+        const byDate = {};
+        hist.forEach((e) => { const cur = byDate[e.date]; if (!cur || e.weight > cur.weight) byDate[e.date] = e; });
+        const dates = Object.keys(byDate).sort();
+        if (dates.length < 2) return null;
+        const first = estE1RM(byDate[dates[0]].weight, byDate[dates[0]].reps);
+        const last = estE1RM(byDate[dates[dates.length - 1]].weight, byDate[dates[dates.length - 1]].reps);
+        return first ? ((last - first) / first) * 100 : 0;
+      }).filter((v) => v !== null);
+      const avg = perExercise.length ? Math.round(perExercise.reduce((a, b) => a + b, 0) / perExercise.length) : 0;
+      return { label: w.name, value: avg };
+    });
+  }, [workouts, exercises, entriesByExerciseStrength]);
+
+  const weeklyVolume = useMemo(() => {
+    const numWeeks = 8;
+    const weeks = [];
+    for (let i = numWeeks - 1; i >= 0; i--) {
+      const end = shiftDate(todayISO(), -i * 7);
+      const start = shiftDate(end, -6);
+      const vol = entries.filter((e) => e.date >= start && e.date <= end).reduce((sum, e) => sum + e.weight * e.sets * e.reps, 0);
+      weeks.push({ label: `W${numWeeks - i}`, volume: vol });
+    }
+    return weeks;
+  }, [entries]);
+
+  const heatmapWeeks = useMemo(() => {
+    const numWeeks = 10;
+    const countByDate = {};
+    entries.forEach((e) => { countByDate[e.date] = (countByDate[e.date] || 0) + 1; });
+    const weeks = [];
+    for (let w = numWeeks - 1; w >= 0; w--) {
+      const week = [];
+      for (let d = 6; d >= 0; d--) {
+        const date = shiftDate(todayISO(), -(w * 7 + d));
+        week.push({ date, count: Math.min(countByDate[date] || 0, 3) });
+      }
+      weeks.push(week);
+    }
+    return weeks;
+  }, [entries]);
+
+  const [carouselPage, setCarouselPage] = useState(0);
+  const carouselRef = useRef(null);
+  const onCarouselScroll = () => {
+    const el = carouselRef.current;
+    if (!el) return;
+    const page = Math.round(el.scrollLeft / el.clientWidth);
+    setCarouselPage(page);
+  };
+
+  const insights = useMemo(() => {
+    const list = [];
+    const todayIso = todayISO();
+    const restSet = new Set(restDays);
+
+    workouts.forEach((w) => {
+      const wEntries = entries.filter((e) => e.workoutId === w.id);
+      if (!wEntries.length) return;
+      const lastDate = wEntries.reduce((max, e) => (e.date > max ? e.date : max), wEntries[0].date);
+      const rawDays = Math.round((new Date(todayIso) - new Date(lastDate)) / 86400000);
+      // Rest days you've explicitly marked don't count against you here.
+      let restDaysInRange = 0;
+      for (let i = 1; i <= rawDays; i++) {
+        if (restSet.has(shiftDate(todayIso, -i))) restDaysInRange++;
+      }
+      const daysSince = rawDays - restDaysInRange;
+      if (daysSince >= 7) list.push({ type: "stale", text: `Haven't trained ${w.name} in ${daysSince} days${restDaysInRange ? ` (${restDaysInRange} of those were rest days)` : ""}.` });
+    });
+
+    const allSeries = allExerciseNames.map((ex) => {
+      const hist = entriesByExerciseStrength[ex] || [];
+      const byDate = {};
+      hist.forEach((e) => { const cur = byDate[e.date]; if (!cur || e.weight > cur.weight) byDate[e.date] = e; });
+      const dates = Object.keys(byDate).sort();
+      const points = dates.map((d) => estE1RM(byDate[d].weight, byDate[d].reps));
+      const best = hist.length ? Math.max(...hist.map((e) => estE1RM(e.weight, e.reps))) : 0;
+      return { exercise: ex, points, best };
+    }).filter((s) => s.points.length >= 3);
+
+    if (allSeries.length) {
+      const withChange = allSeries.map((s) => ({ ...s, pct: Math.round(((s.points[s.points.length - 1] - s.points[0]) / s.points[0]) * 100) }));
+      const bestMover = withChange.reduce((a, b) => (b.pct > a.pct ? b : a));
+      const worstMover = withChange.reduce((a, b) => (b.pct < a.pct ? b : a));
+      if (bestMover.pct > 0) list.push({ type: "up", text: `${bestMover.exercise} is up ${bestMover.pct}% — your best mover right now.` });
+      if (withChange.length > 1 && worstMover.exercise !== bestMover.exercise) {
+        list.push({ type: worstMover.pct < 0 ? "down" : "flat", text: worstMover.pct < 0 ? `${worstMover.exercise} is down ${Math.abs(worstMover.pct)}% — might be worth extra attention.` : `${worstMover.exercise} is up only ${worstMover.pct}% — your slowest mover.` });
+      }
+      const strongest = allSeries.reduce((a, b) => (b.best > a.best ? b : a));
+      list.push({ type: "strongest", text: `${strongest.exercise} is your strongest lift — est. ${strongest.best} lb 1RM.` });
+    }
+
+    return list;
+  }, [entries, workouts, allExerciseNames, entriesByExerciseStrength, restDays]);
+
   const portfolioSeries = useMemo(() => {
     const perExercise = {};
-    entries.forEach((e) => {
+    strengthEntries.forEach((e) => {
       perExercise[e.exercise] = perExercise[e.exercise] || {};
       const cur = perExercise[e.exercise][e.date];
       if (!cur || e.weight > cur.weight) perExercise[e.exercise][e.date] = e;
@@ -543,7 +857,7 @@ export default function Home() {
     }).filter((r) => r.value !== null);
 
     return { rows, exerciseCount: exNames.length };
-  }, [entries]);
+  }, [strengthEntries]);
 
   const portfolioCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === portfolioRange).days), [portfolioRange]);
   const portfolioFiltered = useMemo(() => {
@@ -570,12 +884,18 @@ export default function Home() {
   const tickerDraggingRef = useRef(false);
   const tickerDragStartX = useRef(0);
   const tickerDragStartScroll = useRef(0);
+  const tickerLastInteraction = useRef(0);
   useEffect(() => {
     let rafId;
     const step = () => {
       const el = tickerTrackRef.current;
+      // Safety net: never stay paused more than 4s, even if a pointerup/touchend event got dropped
+      // (happens occasionally on iOS Safari) — self-heals instead of freezing permanently.
+      if (tickerPausedRef.current && Date.now() - tickerLastInteraction.current > 4000) {
+        tickerPausedRef.current = false;
+      }
       if (el && !tickerPausedRef.current && el.scrollWidth > el.clientWidth) {
-        el.scrollLeft += 0.9;
+        el.scrollLeft += 0.98;
         const half = el.scrollWidth / 2;
         if (el.scrollLeft >= half) el.scrollLeft -= half;
       }
@@ -584,8 +904,15 @@ export default function Home() {
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
   }, [tickerSeries.length]);
-  const pauseTicker = () => { tickerPausedRef.current = true; if (tickerResumeTimeout.current) clearTimeout(tickerResumeTimeout.current); };
-  const scheduleTickerResume = () => { tickerResumeTimeout.current = setTimeout(() => { tickerPausedRef.current = false; }, 2500); };
+  const pauseTicker = () => {
+    tickerPausedRef.current = true;
+    tickerLastInteraction.current = Date.now();
+    if (tickerResumeTimeout.current) clearTimeout(tickerResumeTimeout.current);
+  };
+  const scheduleTickerResume = () => {
+    tickerLastInteraction.current = Date.now();
+    tickerResumeTimeout.current = setTimeout(() => { tickerPausedRef.current = false; }, 2000);
+  };
   const tickerPointerDown = (e) => {
     pauseTicker();
     if (e.pointerType === "mouse") {
@@ -596,6 +923,7 @@ export default function Home() {
   };
   const tickerPointerMove = (e) => {
     if (!tickerDraggingRef.current || e.pointerType !== "mouse" || !tickerTrackRef.current) return;
+    tickerLastInteraction.current = Date.now();
     tickerTrackRef.current.scrollLeft = tickerDragStartScroll.current - (e.clientX - tickerDragStartX.current);
   };
   const tickerPointerUp = () => { tickerDraggingRef.current = false; scheduleTickerResume(); };
@@ -603,8 +931,20 @@ export default function Home() {
   const rangeCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === chartRange).days), [chartRange]);
 
   const chartResult = useMemo(() => {
-    const inRange = entries.filter((e) => e.date >= rangeCutoff);
+    const inRange = strengthEntries.filter((e) => e.date >= rangeCutoff);
     const metricVal = (entry) => (chartMetric === "e1rm" ? estE1RM(entry.weight, entry.reps) : entry.weight);
+
+    if (chartFocusExercise) {
+      const scoped = inRange.filter((e) => e.exercise === chartFocusExercise);
+      const byDate = {};
+      scoped.forEach((e) => { const cur = byDate[e.date]; if (!cur || e.weight > cur.weight) byDate[e.date] = e; });
+      const dates = Object.keys(byDate).sort();
+      const rows = dates.map((date) => {
+        const entry = byDate[date];
+        return { date, label: fmtDate(date), [chartFocusExercise]: metricVal(entry), [`${chartFocusExercise}__r`]: entry.reps, [`${chartFocusExercise}__s`]: entry.sets };
+      });
+      return { rows, series: [chartFocusExercise] };
+    }
 
     if (chartScope === "ALL") {
       // best (heaviest) entry per exercise per date per workout
@@ -648,51 +988,81 @@ export default function Home() {
       });
       return { rows, series: Object.keys(byExDate) };
     }
-  }, [entries, chartScope, rangeCutoff, chartMetric, workouts]);
+  }, [strengthEntries, chartScope, rangeCutoff, chartMetric, workouts, chartFocusExercise]);
 
   const [recExercise, setRecExercise] = useState(null);
+  const [recSearch, setRecSearch] = useState("");
+  const [recSuggestOpen, setRecSuggestOpen] = useState(false);
+  const recSuggestions = useMemo(() => {
+    const q = recSearch.trim().toLowerCase();
+    if (!q) return allExerciseNames.slice(0, 8);
+    const starts = allExerciseNames.filter((e) => e.toLowerCase().startsWith(q));
+    const contains = allExerciseNames.filter((e) => !e.toLowerCase().startsWith(q) && e.toLowerCase().includes(q));
+    return [...starts, ...contains].slice(0, 8);
+  }, [recSearch, allExerciseNames]);
   const [recSets, setRecSets] = useState(3);
+  const [manualWeight, setManualWeight] = useState("");
+  const [manualReps, setManualReps] = useState("");
 
   const recommendation = useMemo(() => {
     if (!recExercise) return null;
-    const hist = entriesByExercise[recExercise];
-    if (!hist || !hist.length) return { noData: true };
+    const hist = entriesByExerciseStrength[recExercise];
+    const hasManual = manualWeight && manualReps;
+
+    if ((!hist || !hist.length) && !hasManual) return { noData: true };
 
     const repLow = REC_LOW, repHigh = REC_HIGH;
-    const { pool: workingSetHist, recencyLimited } = pickWorkingBasis(hist);
 
     let nextTopWeight, note, lastTop, lastSessionDate, lastSession, basedOnActualSets;
 
-    if (workingSetHist.length > 0) {
-      lastSessionDate = workingSetHist[0].date;
-      lastSession = workingSetHist.filter((e) => e.date === lastSessionDate).sort((a, b) => b.weight - a.weight);
-      lastTop = lastSession[0];
-      const plateaued = plateauFlag(workingSetHist);
-      nextTopWeight = lastTop.weight;
-      const recencyNote = recencyLimited ? " (based on your last ~2 months)" : "";
+    if (hist && hist.length) {
+      const { pool: workingSetHist, recencyLimited } = pickWorkingBasis(hist);
 
-      if (lastTop.reps >= repHigh || plateaued) {
-        const bump = lastTop.weight >= 100 ? 10 : 5;
-        nextTopWeight = lastTop.weight + bump;
-        note = plateaued && lastTop.reps < repHigh
-          ? `Same top weight 3 sessions running${recencyNote} — bumping ${bump} lbs to break the plateau.`
-          : `You hit ${lastTop.reps} reps last time (top of the 8–12 range)${recencyNote} — adding ${bump} lbs.`;
-      } else if (lastTop.reps < repLow) {
-        note = `Last working top set was ${lastTop.reps} reps, under the 8 rep floor${recencyNote} — same weight, focus on hitting 8+.`;
+      if (workingSetHist.length > 0) {
+        lastSessionDate = workingSetHist[0].date;
+        lastSession = workingSetHist.filter((e) => e.date === lastSessionDate).sort((a, b) => b.weight - a.weight);
+        lastTop = lastSession[0];
+        nextTopWeight = lastTop.weight;
+        const recencyNote = recencyLimited ? " (based on your last ~2 months)" : "";
+
+        if (progressionMode === "reps") {
+          note = `Holding weight steady on purpose — aim to beat ${lastTop.reps} reps this time${recencyNote}. Switch back to weight-focused mode whenever you want the app to bump weight automatically.`;
+        } else {
+          const plateaued = plateauFlag(workingSetHist);
+          if (lastTop.reps >= repHigh || plateaued) {
+            const bump = lastTop.weight >= 100 ? 10 : 5;
+            nextTopWeight = lastTop.weight + bump;
+            note = plateaued && lastTop.reps < repHigh
+              ? `Same top weight 3 sessions running${recencyNote} — bumping ${bump} lbs to break the plateau.`
+              : `You hit ${lastTop.reps} reps last time (top of the 8–12 range)${recencyNote} — adding ${bump} lbs.`;
+          } else if (lastTop.reps < repLow) {
+            note = `Last working top set was ${lastTop.reps} reps, under the 8 rep floor${recencyNote} — same weight, focus on hitting 8+.`;
+          } else {
+            note = `Last working top set: ${lastTop.weight} lbs × ${lastTop.reps}${recencyNote}. Same weight — aim to add a rep or two before the next bump.`;
+          }
+        }
+        basedOnActualSets = lastSession.length >= 2;
       } else {
-        note = `Last working top set: ${lastTop.weight} lbs × ${lastTop.reps}${recencyNote}. Same weight — aim to add a rep or two before the next bump.`;
+        // Only heavy low-rep attempts on record for this exercise — estimate an 8-12 rep starting
+        // weight from the best tested max instead of prescribing the max weight itself.
+        const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
+        const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
+        nextTopWeight = roundTo5(e1rm / (1 + repLow / 30));
+        lastTop = bestEntry;
+        lastSessionDate = bestEntry.date;
+        lastSession = [bestEntry];
+        note = `Only low-rep attempts logged for this exercise (best: ${bestEntry.weight} lbs × ${bestEntry.reps}) — no 8–12 rep working set on record yet. This starting weight is back-calculated from your estimated max, so treat it as a first guess and adjust by feel.`;
+        basedOnActualSets = false;
       }
-      basedOnActualSets = lastSession.length >= 2;
     } else {
-      // Only heavy low-rep attempts on record for this exercise — estimate an 8-12 rep starting
-      // weight from the best tested max instead of prescribing the max weight itself.
-      const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
-      const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
+      // No logged history at all — build a first recommendation straight from a reported strongest set.
+      const w = Number(manualWeight), r = Number(manualReps);
+      const e1rm = estE1RM(w, r);
       nextTopWeight = roundTo5(e1rm / (1 + repLow / 30));
-      lastTop = bestEntry;
-      lastSessionDate = bestEntry.date;
-      lastSession = [bestEntry];
-      note = `Only low-rep attempts logged for this exercise (best: ${bestEntry.weight} lbs × ${bestEntry.reps}) — no 8–12 rep working set on record yet. This starting weight is back-calculated from your estimated max, so treat it as a first guess and adjust by feel.`;
+      lastTop = { weight: w, reps: r };
+      lastSessionDate = null;
+      lastSession = [lastTop];
+      note = `Based on the strongest set you entered (${w} lbs × ${r}) — no logged history yet, so this is a first estimate. Log a real session anytime and this'll switch to using your actual numbers.`;
       basedOnActualSets = false;
     }
 
@@ -710,8 +1080,8 @@ export default function Home() {
       return { set: i + 1, weight: w };
     });
 
-    return { noData: false, lastTop, lastSessionDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets };
-  }, [recExercise, recSets, entriesByExercise]);
+    return { noData: false, lastTop, lastSessionDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets, fromManual: !hist || !hist.length };
+  }, [recExercise, recSets, entriesByExerciseStrength, manualWeight, manualReps, progressionMode]);
 
   const [goalExercise, setGoalExercise] = useState(null);
   const [goalWeight, setGoalWeight] = useState("");
@@ -722,12 +1092,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!goalExercise) return;
-    const hist = entriesByExercise[goalExercise];
+    const hist = entriesByExerciseStrength[goalExercise];
     if (hist && hist.length && !goalMaxTouched) {
       const best = hist.reduce((m, e) => Math.max(m, estE1RM(e.weight, e.reps)), 0);
       setGoalCurrentMax(String(roundTo5(best)));
     }
-  }, [goalExercise, entriesByExercise, goalMaxTouched]);
+  }, [goalExercise, entriesByExerciseStrength, goalMaxTouched]);
 
   const goalProgram = useMemo(() => {
     if (!goalExercise || !goalWeight || !goalCurrentMax || !goalWeeks) return null;
@@ -738,8 +1108,11 @@ export default function Home() {
     for (let w = 1; w <= weeks; w++) {
       const t = w / weeks;
       const heavyWeight = roundTo5(cur + (goal - cur) * t);
-      const heavyPct = heavyWeight / goal;
-      const heavyReps = repsForPct(heavyPct);
+      // Reps taper by week progression (assuming your real strength is rising in step with the
+      // program), not by weight-vs-goal — that comparison breaks the moment the prescribed
+      // weight is above your current max, which happens almost every week by design.
+      const weekFrac = weeks > 1 ? (w - 1) / (weeks - 1) : 1;
+      const heavyReps = Math.max(1, Math.round(6 - 5 * weekFrac));
       const heavySets = heavyReps <= 2 ? 1 : 3;
       const week = { week: w, heavy: { weight: heavyWeight, reps: heavyReps, sets: heavySets } };
       if (goalDaysPerWeek === 2) {
@@ -819,20 +1192,13 @@ export default function Home() {
               <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
             ))}
             <div className="new-row">
-              <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 12, flex: 1 }} />
+              <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
               <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
             </div>
           </div>
         )}
         {showMenu && (
           <div className="dropdown right">
-            <button className="item" style={{ color: view === "portfolio" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("portfolio"); setShowMenu(false); }}>Overall</button>
-            <button className="item" style={{ color: view === "home" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("home"); setShowMenu(false); }}>Log a set</button>
-            <button className="item" style={{ color: view === "exercises" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("exercises"); setShowMenu(false); }}>All exercises</button>
-            <button className="item" style={{ color: view === "charts" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("charts"); setShowMenu(false); }}>Progress charts</button>
-            <button className="item" style={{ color: view === "recommend" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("recommend"); setShowMenu(false); }}>Recommended weight</button>
-            <button className="item" style={{ color: view === "goal" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("goal"); setShowMenu(false); }}>Goal program</button>
-            <button className="item" style={{ color: view === "import" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("import"); setShowMenu(false); }}>Import history</button>
             <button className="item" style={{ color: view === "export" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("export"); setShowMenu(false); }}>Export / backup</button>
           </div>
         )}
@@ -844,7 +1210,60 @@ export default function Home() {
         <div className="empty">Loading your log…</div>
       ) : view === "portfolio" ? (
         <>
-          <div className="ticker-wrap">
+          <div className="chart-carousel" ref={carouselRef} onScroll={onCarouselScroll}>
+            <div className="chart-carousel-page">
+              <div className="portfolio-change">
+                {scrubPoint ? (
+                  <>
+                    <span style={{ color: scrubPoint.value >= 0 ? "#22c55e" : "#ef4444" }}>
+                      {scrubPoint.value > 0 ? "+" : ""}{scrubPoint.value}%
+                    </span>
+                    <span className="cap">{scrubPoint.label}</span>
+                  </>
+                ) : portfolioChange ? (
+                  <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
+                    {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
+                  </span>
+                ) : <span className="cap">Not enough data yet</span>}
+                {!scrubPoint && <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>}
+              </div>
+
+              <div className="chart-box">
+                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} onScrub={setScrubPoint} />
+              </div>
+              <div className="axis-caption">Drag along the line to see any date — % change in overall estimated strength vs. the start of this range</div>
+
+              <div className="pills">
+                {RANGE_PRESETS.map((r) => (
+                  <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}>{r.label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Strength growth by category</div>
+              <RadarChart data={radarData} />
+              <div className="axis-caption">Average % change in estimated 1RM across each workout's exercises, all-time</div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Weekly training volume</div>
+              <VolumeBarChart weeks={weeklyVolume} />
+              <div className="axis-caption">Total weight × sets × reps logged each week, last 8 weeks</div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Training consistency</div>
+              <ConsistencyHeatmap weeks={heatmapWeeks} />
+              <div className="axis-caption">Darker = more sets logged that day, last 10 weeks</div>
+            </div>
+          </div>
+
+          <div className="carousel-dots">
+            {[0, 1, 2, 3].map((i) => <div key={i} className={"carousel-dot" + (carouselPage === i ? " active" : "")} />)}
+          </div>
+
+          <div className="ticker-wrap" style={{ marginTop: 22 }}>
             <button className="ticker-scope-btn" onClick={() => setTickerMenuOpen((v) => !v)}>
               {tickerScope === "ALL" ? "All Exercises" : workouts.find((w) => w.id === tickerScope)?.name} ▾
             </button>
@@ -871,39 +1290,19 @@ export default function Home() {
                 onTouchEnd={scheduleTickerResume}
               >
                 <div className="ticker-track">
-                  {[...tickerSeries, ...tickerSeries].map((s, i) => <TickerItem key={i} series={s} />)}
+                  {[...tickerSeries, ...tickerSeries].map((s, i) => (
+                    <TickerItem key={i} series={s} onClick={() => { setChartFocusExercise(s.exercise); setView("charts"); }} />
+                  ))}
                 </div>
               </div>
             )}
           </div>
 
-          {tickerScope === "ALL" ? (
-            <>
-              <div className="portfolio-change">
-                {portfolioChange ? (
-                  <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
-                    {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
-                  </span>
-                ) : <span className="cap">Not enough data yet</span>}
-                <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>
-              </div>
-
-              <div className="chart-box">
-                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} />
-              </div>
-              <div className="axis-caption">% change in overall estimated strength vs. the start of this range</div>
-
-              <div className="pills">
-                {RANGE_PRESETS.map((r) => (
-                  <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => setPortfolioRange(r.key)}>{r.label}</button>
-                ))}
-              </div>
-            </>
-          ) : (
+          {tickerScope !== "ALL" && (
             <div style={{ marginTop: 18 }}>
               <div className="label-sm" style={{ marginBottom: 10 }}>{workouts.find((w) => w.id === tickerScope)?.name} — today's targets</div>
               {(exercises[tickerScope] || []).map((ex) => {
-                const rec = quickRecommend(entriesByExercise[ex]);
+                const rec = quickRecommend(entriesByExerciseStrength[ex], progressionMode);
                 return (
                   <div key={ex} className="day-list-item">
                     <div className="day-list-name">{ex}</div>
@@ -916,6 +1315,21 @@ export default function Home() {
                     ) : (
                       <div className="rec-reps" style={{ color: "var(--mute)" }}>no sets logged yet</div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {insights.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div className="label-sm" style={{ marginBottom: 10 }}>Insights</div>
+              {insights.map((ins, i) => {
+                const dotColor = ins.type === "up" || ins.type === "strongest" ? "#22c55e" : ins.type === "down" ? "#ef4444" : "var(--iron)";
+                return (
+                  <div key={i} className="insight-item">
+                    <span className="dot" style={{ background: dotColor }} />
+                    <span>{ins.text}</span>
                   </div>
                 );
               })}
@@ -937,10 +1351,14 @@ export default function Home() {
             {calendarOpen && <CalendarPopup selectedDate={selectedDate} onSelect={setSelectedDate} onClose={() => setCalendarOpen(false)} />}
           </div>
 
+          <button className={"rest-day-btn" + (restDays.includes(selectedDate) ? " active" : "")} onClick={() => toggleRestDay(selectedDate)}>
+            {restDays.includes(selectedDate) ? "✓ Rest day" : "Rest day?"}
+          </button>
+
           <div className="card">
             <div className="label-sm">Sets × Reps</div>
             <div className="ex-input-wrap">
-              <input className="ex-input" placeholder="Exercise" value={form.exercise} onChange={(e) => { setForm({ ...form, exercise: e.target.value }); setShowSuggestions(true); }} onFocus={() => setShowSuggestions(true)} onBlur={() => setTimeout(() => setShowSuggestions(false), 150)} />
+              <input className="ex-input" placeholder="Exercise" value={form.exercise} onChange={(e) => { setForm({ ...form, exercise: e.target.value }); setShowSuggestions(true); }} onFocus={(e) => { setShowSuggestions(true); setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 300); }} onBlur={() => setTimeout(() => setShowSuggestions(false), 150)} />
               {showSuggestions && suggestions.length > 0 && (
                 <div className="suggestions">
                   {suggestions.map((s) => <button key={s} onClick={() => { setForm({ ...form, exercise: s }); setShowSuggestions(false); }}>{s}</button>)}
@@ -952,6 +1370,10 @@ export default function Home() {
               <input type="number" inputMode="numeric" placeholder="sets" value={form.sets} onChange={(e) => setForm({ ...form, sets: e.target.value })} />
               <input type="number" inputMode="numeric" placeholder="reps" value={form.reps} onChange={(e) => setForm({ ...form, reps: e.target.value })} />
             </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13, color: "var(--mute)", cursor: "pointer" }}>
+              <input type="checkbox" checked={form.isWarmup} onChange={(e) => setForm({ ...form, isWarmup: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--iron)" }} />
+              Warm-up set (won't count toward recommendations or your top set)
+            </label>
             <button className="btn-iron save-btn" onClick={submitSet}>Save Set</button>
           </div>
 
@@ -972,9 +1394,9 @@ export default function Home() {
               <div className="label-sm">Logged — {fmtDateFull(selectedDate)}</div>
               <div className="today-list">
                 {todaysEntries.map((e) => (
-                  <div key={e.id} className="today-item">
-                    <span style={{ fontWeight: 600 }}>{e.exercise}</span>
-                    <span className="num">{e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}<button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button></span>
+                  <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
+                    <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: 10, fontWeight: 400 }}> (warm-up)</span>}</span>
+                    <span className="num">{e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}<button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button><button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button></span>
                   </div>
                 ))}
               </div>
@@ -986,9 +1408,10 @@ export default function Home() {
           <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           {activeList.map((ex) => {
             const history = entriesByExercise[ex] || [];
-            const best = history.reduce((m, e) => Math.max(m, e.weight), 0);
+            const strengthHistory = history.filter((e) => !e.isWarmup);
+            const best = strengthHistory.reduce((m, e) => Math.max(m, e.weight), 0);
             const isOpen = expandedExercise === ex;
-            const plateaued = plateauFlag(history);
+            const plateaued = plateauFlag(strengthHistory);
             return (
               <div key={ex} className="ex-card">
                 <div className="ex-head" style={{ cursor: "pointer" }} onClick={() => setExpandedExercise(isOpen ? null : ex)}>
@@ -1012,7 +1435,11 @@ export default function Home() {
                     {history.slice(0, 8).map((e) => (
                       <div key={e.id} className="hist-item">
                         <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
-                        <span className="num">{e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}</span>
+                        <span className="num" style={{ opacity: e.isWarmup ? 0.55 : 1 }}>
+                          {e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}
+                          {e.isWarmup && <span className="muted" style={{ fontSize: 10 }}> (warm-up)</span>}
+                        </span>
+                        <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
                         <button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button>
                       </div>
                     ))}
@@ -1025,10 +1452,17 @@ export default function Home() {
       ) : view === "charts" ? (
         <>
           <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
-          <select className="scope" value={chartScope} onChange={(e) => setChartScope(e.target.value)}>
-            <option value="ALL">All Workouts</option>
-            {workouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
+          {chartFocusExercise ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <span style={{ fontWeight: 700, fontSize: 16 }}>{chartFocusExercise}</span>
+              <button onClick={() => setChartFocusExercise(null)} style={{ background: "none", border: "none", color: "var(--mute)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ View by workout</button>
+            </div>
+          ) : (
+            <select className="scope" value={chartScope} onChange={(e) => { setChartScope(e.target.value); setChartFocusExercise(null); }}>
+              <option value="ALL">All Workouts</option>
+              {workouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          )}
           <div className="pills">
             {RANGE_PRESETS.map((r) => <button key={r.key} className={"pill" + (r.key === chartRange ? " active" : "")} onClick={() => setChartRange(r.key)}>{r.label}</button>)}
           </div>
@@ -1040,12 +1474,12 @@ export default function Home() {
             <div className="empty">No sets logged in this range yet.</div>
           ) : (
             <div className="card">
-              <SvgChart rows={chartResult.rows} series={chartResult.series} mode={chartScope === "ALL" ? "workout" : "exercise"} metric={chartMetric} />
+              <SvgChart rows={chartResult.rows} series={chartResult.series} mode={chartFocusExercise || chartScope !== "ALL" ? "exercise" : "workout"} metric={chartMetric} />
               <div className="legend">
                 {chartResult.series.map((s, i) => <div key={s} className="legend-item"><span className="legend-dot" style={{ background: LINE_COLORS[i % LINE_COLORS.length] }} />{s}</div>)}
               </div>
               <div className="chart-note">
-                {chartScope === "ALL" ? "Each line is a workout day's average top set across its exercises. " : "Each line is an exercise's heaviest set logged that day. "}
+                {chartFocusExercise ? "This exercise's heaviest set logged each day. " : chartScope === "ALL" ? "Each line is a workout day's average top set across its exercises. " : "Each line is an exercise's heaviest set logged that day. "}
                 Tap a point for the exact reps, sets, and weight. {chartMetric === "e1rm" && "Est. 1RM uses the Epley formula from your top set's weight and reps."}
               </div>
             </div>
@@ -1054,10 +1488,33 @@ export default function Home() {
       ) : view === "recommend" ? (
         <>
           <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
-          <select className="scope" value={recExercise || ""} onChange={(e) => setRecExercise(e.target.value || null)}>
-            <option value="">Select an exercise…</option>
-            {allExerciseNames.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+          <div className="ex-input-wrap">
+            <input
+              className="ex-input"
+              placeholder="Search an exercise…"
+              value={recExercise ? recExercise : recSearch}
+              onChange={(e) => { setRecSearch(e.target.value); setRecExercise(null); setManualWeight(""); setManualReps(""); setRecSuggestOpen(true); }}
+              onFocus={(e) => { setRecSuggestOpen(true); setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 300); }}
+              onBlur={() => setTimeout(() => setRecSuggestOpen(false), 150)}
+            />
+            {recSuggestOpen && recSuggestions.length > 0 && (
+              <div className="suggestions">
+                {recSuggestions.map((name) => (
+                  <button key={name} onClick={() => { setRecExercise(name); setRecSearch(""); setManualWeight(""); setManualReps(""); setRecSuggestOpen(false); }}>{name}</button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pills" style={{ marginBottom: recExercise ? 12 : 16 }}>
+            <button className={"pill" + (progressionMode === "weight" ? " active" : "")} onClick={() => setProgressionModeAndSave("weight")}>Increase Weight</button>
+            <button className={"pill" + (progressionMode === "reps" ? " active" : "")} onClick={() => setProgressionModeAndSave("reps")}>Increase Reps</button>
+          </div>
+          <div className="axis-caption" style={{ marginTop: -6, marginBottom: 14 }}>
+            {progressionMode === "weight"
+              ? "Same weight until you hit 12 reps, then weight goes up and reps reset to 8."
+              : "Weight stays put — this only tracks how many reps you can add over time. Switch back to Increase Weight whenever you're ready."}
+          </div>
 
           {recExercise && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -1071,11 +1528,20 @@ export default function Home() {
           {!recExercise ? (
             <div className="empty">Pick an exercise to see a suggested weight for today.</div>
           ) : recommendation?.noData ? (
-            <div className="empty">No sets logged for {recExercise} yet — log a session first.</div>
+            <div className="card">
+              <div className="label-sm">What's your strongest set?</div>
+              <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+                No sets logged for {recExercise} yet. Enter the most weight you've lifted for it and how many reps — that's enough to build a first recommendation.
+              </div>
+              <div className="row3" style={{ marginBottom: 0 }}>
+                <input type="number" inputMode="decimal" placeholder="lbs" value={manualWeight} onChange={(e) => setManualWeight(e.target.value)} />
+                <input type="number" inputMode="numeric" placeholder="reps" value={manualReps} onChange={(e) => setManualReps(e.target.value)} />
+              </div>
+            </div>
           ) : recommendation && (
             <div className="card">
               <div className="label-sm">
-                Last logged {fmtDate(recommendation.lastSessionDate)} · {recommendation.lastTop.weight} lbs × {recommendation.lastTop.reps}
+                {recommendation.fromManual ? "Strongest set" : `Last logged ${fmtDate(recommendation.lastSessionDate)}`} · {recommendation.lastTop.weight} lbs × {recommendation.lastTop.reps}
               </div>
               <div style={{ fontSize: 13, color: "var(--chalk)", marginBottom: 14, lineHeight: 1.5 }}>{recommendation.note}</div>
               <div className="today-list">
@@ -1089,7 +1555,7 @@ export default function Home() {
               <div className="chart-note" style={{ marginTop: 14 }}>
                 {recommendation.basedOnActualSets
                   ? "Backoff weights are modeled on your own logged set-by-set drop-off last session."
-                  : "Backoff weights use a standard pyramid (90% / 85% / 80%…) since you logged this as one combined entry last time — log each set separately for a more personalized backoff curve."}
+                  : "Backoff weights use a standard pyramid (90% / 85% / 80%…) — a solid estimate from a single logged set."}
                 {" "}Double progression: same weight until you hit {recommendation.repHigh} reps on the top set, then the weight goes up and reps reset to {recommendation.repLow}. This is a starting point — listen to how the weight actually feels that day.
               </div>
             </div>
@@ -1107,10 +1573,10 @@ export default function Home() {
             <>
               <div className="card" style={{ marginBottom: 16 }}>
                 <div className="label-sm">Current max (est.)</div>
-                <input type="number" inputMode="decimal" value={goalCurrentMax} onChange={(e) => { setGoalCurrentMax(e.target.value); setGoalMaxTouched(true); }} style={{ width: "100%", padding: "10px 12px", fontSize: 15, fontWeight: 700, fontFamily: "monospace", marginBottom: 12 }} />
+                <input type="number" inputMode="decimal" value={goalCurrentMax} onChange={(e) => { setGoalCurrentMax(e.target.value); setGoalMaxTouched(true); }} style={{ width: "100%", padding: "10px 12px", fontSize: 16, fontWeight: 700, fontFamily: "monospace", marginBottom: 12 }} />
 
                 <div className="label-sm">Goal weight</div>
-                <input type="number" inputMode="decimal" placeholder="e.g. 315" value={goalWeight} onChange={(e) => setGoalWeight(e.target.value)} style={{ width: "100%", padding: "10px 12px", fontSize: 15, fontWeight: 700, fontFamily: "monospace", marginBottom: 12 }} />
+                <input type="number" inputMode="decimal" placeholder="e.g. 315" value={goalWeight} onChange={(e) => setGoalWeight(e.target.value)} style={{ width: "100%", padding: "10px 12px", fontSize: 16, fontWeight: 700, fontFamily: "monospace", marginBottom: 12 }} />
 
                 <div style={{ display: "flex", gap: 20 }}>
                   <div style={{ flex: 1 }}>
@@ -1199,6 +1665,27 @@ export default function Home() {
           </div>
         </>
       )}
+
+      <div className="bottom-nav">
+        <button className={"bottom-nav-item" + (view === "portfolio" ? " active" : "")} onClick={() => setView("portfolio")}>
+          <IconHome color={view === "portfolio" ? "var(--iron)" : "var(--mute)"} /><span>Overall</span>
+        </button>
+        <button className={"bottom-nav-item" + (view === "exercises" ? " active" : "")} onClick={() => setView("exercises")}>
+          <IconDumbbell color={view === "exercises" ? "var(--iron)" : "var(--mute)"} /><span>Exercises</span>
+        </button>
+        <button className={"bottom-nav-item" + (view === "charts" ? " active" : "")} onClick={() => setView("charts")}>
+          <IconChart color={view === "charts" ? "var(--iron)" : "var(--mute)"} /><span>Progress</span>
+        </button>
+        <button className={"bottom-nav-item" + (view === "recommend" ? " active" : "")} onClick={() => setView("recommend")}>
+          <IconBulb color={view === "recommend" ? "var(--iron)" : "var(--mute)"} /><span>Recommend</span>
+        </button>
+        <button className={"bottom-nav-item" + (view === "goal" ? " active" : "")} onClick={() => setView("goal")}>
+          <IconTarget color={view === "goal" ? "var(--iron)" : "var(--mute)"} /><span>Goal</span>
+        </button>
+        <button className={"bottom-nav-item" + (view === "import" ? " active" : "")} onClick={() => setView("import")}>
+          <IconBook color={view === "import" ? "var(--iron)" : "var(--mute)"} /><span>Import</span>
+        </button>
+      </div>
     </div>
   );
 }
