@@ -69,7 +69,9 @@ const CARD_INK = "var(--card)";
 const estE1RM = (weight, reps) => (reps > 0 ? Math.round(weight * (1 + reps / 30)) : weight);
 
 function SvgChart({ rows, series, mode, metric }) {
-  const [active, setActive] = useState(null);
+  const [activeIdx, setActiveIdx] = useState(null);
+  const svgRef = useRef(null);
+  const draggingRef = useRef(false);
   const W = 340, H = 210, padL = 34, padR = 8, padT = 10, padB = 24;
   const allVals = [];
   rows.forEach((r) => series.forEach((s) => { if (r[s] !== undefined) allVals.push(r[s]); }));
@@ -80,24 +82,48 @@ function SvgChart({ rows, series, mode, metric }) {
   const y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
   const xTickEvery = Math.max(1, Math.ceil(n / 5));
 
-  const showPoint = (i, s, si) => {
-    const r = rows[i];
-    const color = LINE_COLORS[si % LINE_COLORS.length];
-    if (mode === "exercise") {
-      setActive({ x: x(i), y: y(r[s]), title: r.label, color, lines: [`${s}`, `${r[s]}${metric === "e1rm" ? " est. 1RM" : " lbs"}${r[`${s}__r`] ? ` · ${r[`${s}__r`]} reps${r[`${s}__s`] > 1 ? ` × ${r[`${s}__s`]} sets` : ""}` : ""}`] });
-    } else {
-      const detail = r[`${s}__detail`] || [];
-      setActive({ x: x(i), y: y(r[s]), title: `${r.label} — ${s}`, color, lines: detail.map((d) => `${d.exercise}: ${d.weight} lbs × ${d.reps}${d.sets > 1 ? ` × ${d.sets}` : ""}`) });
-    }
+  const posToIndex = (clientX) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const relX = ((clientX - rect.left) / rect.width) * W;
+    let nearest = 0, minDist = Infinity;
+    rows.forEach((r, i) => { const d = Math.abs(x(i) - relX); if (d < minDist) { minDist = d; nearest = i; } });
+    return nearest;
   };
+  const scrubTo = (clientX) => { const idx = posToIndex(clientX); if (idx !== null) setActiveIdx(idx); };
+  const startScrub = (e) => { draggingRef.current = true; scrubTo(e.clientX); };
+  const moveScrub = (e) => { if (draggingRef.current) scrubTo(e.clientX); };
+  const endScrub = () => { draggingRef.current = false; };
 
-  const boxW = 160, lineH = 12;
-  const boxH = active ? 20 + active.lines.length * lineH : 0;
-  let boxX = active ? Math.min(Math.max(active.x - boxW / 2, 2), W - boxW - 2) : 0;
-  let boxY = active ? (active.y - boxH - 10 < 0 ? active.y + 12 : active.y - boxH - 10) : 0;
+  const activeRow = activeIdx !== null ? rows[activeIdx] : null;
+  const activeLines = activeRow
+    ? series.filter((s) => activeRow[s] !== undefined).map((s, si) => {
+        const colorIdx = series.indexOf(s);
+        const detail = mode === "workout" ? (activeRow[`${s}__detail`] || []) : null;
+        const suffix = mode === "exercise"
+          ? `${activeRow[s]}${metric === "e1rm" ? " e1RM" : " lbs"}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
+          : `${activeRow[s]}${metric === "e1rm" ? " e1RM" : " lbs"}`;
+        return { series: s, color: LINE_COLORS[colorIdx % LINE_COLORS.length], text: `${s}: ${suffix}`, detail };
+      })
+    : [];
+
+  const boxW = 170, lineH = 12;
+  const boxLineCount = activeLines.reduce((n2, l) => n2 + 1 + (l.detail ? l.detail.length : 0), 0);
+  const boxH = activeRow ? 20 + boxLineCount * lineH : 0;
+  let boxX = activeRow ? Math.min(Math.max(x(activeIdx) - boxW / 2, 2), W - boxW - 2) : 0;
+  let boxY = activeRow ? Math.max(padT + 2, 10) : 0;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 230 }} onClick={(e) => { if (e.target.tagName === "svg" || e.target.tagName === "rect" && e.target.dataset.bg) setActive(null); }}>
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", height: 230, touchAction: "none", cursor: "crosshair" }}
+      onPointerDown={startScrub}
+      onPointerMove={moveScrub}
+      onPointerUp={endScrub}
+      onPointerLeave={endScrub}
+    >
       <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + t * (H - padT - padB);
@@ -106,24 +132,30 @@ function SvgChart({ rows, series, mode, metric }) {
       })}
       {series.map((s, si) => {
         const pts = [];
-        const dots = [];
-        rows.forEach((r, i) => {
-          if (r[s] !== undefined) {
-            pts.push(`${x(i)},${y(r[s])}`);
-            dots.push(<circle key={i} cx={x(i)} cy={y(r[s])} r={5} fill={LINE_COLORS[si % LINE_COLORS.length]} stroke={INK} strokeWidth="1.5" style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); showPoint(i, s, si); }} onMouseEnter={() => showPoint(i, s, si)} />);
-          }
-        });
-        return <g key={s}><polyline points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />{dots}</g>;
+        rows.forEach((r, i) => { if (r[s] !== undefined) pts.push(`${x(i)},${y(r[s])}`); });
+        return <polyline key={s} points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />;
       })}
       {rows.map((r, i) => (i % xTickEvery === 0 || i === n - 1) && <text key={i} x={x(i)} y={H - 6} fontSize="9" fill="var(--mute)" textAnchor="middle">{r.label}</text>)}
 
-      {active && (
+      {activeRow && (
         <g>
-          <circle cx={active.x} cy={active.y} r={7} fill={active.color || "var(--iron)"} stroke="var(--ink)" strokeWidth="2.5" />
-          <circle cx={active.x} cy={active.y} r={11} fill="none" stroke={active.color || "var(--iron)"} strokeWidth="1.5" opacity="0.5" />
+          <line x1={x(activeIdx)} y1={padT} x2={x(activeIdx)} y2={H - padB} stroke="var(--mute)" strokeWidth="1" strokeDasharray="3,3" opacity="0.6" />
+          {activeLines.map((l) => (
+            <circle key={l.series} cx={x(activeIdx)} cy={y(activeRow[l.series])} r={5} fill={l.color} stroke={INK} strokeWidth="1.5" />
+          ))}
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="var(--border)" />
-          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{active.title}</text>
-          {active.lines.map((l, i) => <text key={i} x={boxX + 8} y={boxY + 14 + (i + 1) * lineH} fontSize="10" fontWeight="600" fill="var(--chalk)">{l}</text>)}
+          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{activeRow.label}</text>
+          {(() => {
+            let lineIdx = 0;
+            return activeLines.map((l) => {
+              const rowsOut = [];
+              rowsOut.push(<text key={`${l.series}-h`} x={boxX + 8} y={boxY + 14 + (++lineIdx) * lineH} fontSize="10" fontWeight="700" fill={l.color}>{l.text}</text>);
+              if (l.detail) l.detail.forEach((d, di) => {
+                rowsOut.push(<text key={`${l.series}-d${di}`} x={boxX + 14} y={boxY + 14 + (++lineIdx) * lineH} fontSize="9" fontWeight="500" fill="var(--chalk)">{d.exercise}: {d.weight} lbs × {d.reps}{d.sets > 1 ? ` × ${d.sets}` : ""}</text>);
+              });
+              return rowsOut;
+            });
+          })()}
         </g>
       )}
     </svg>
@@ -151,8 +183,15 @@ const roundTo5 = (v) => Math.round(v / 5) * 5;
 function plateauFlag(history) {
   const distinctDates = [...new Set(history.map((e) => e.date))];
   if (distinctDates.length < 3) return false;
-  const tops = distinctDates.slice(0, 3).map((d) => Math.max(...history.filter((e) => e.date === d).map((e) => e.weight)));
-  return tops.every((t) => t === tops[0]);
+  // Percent-based on estimated 1RM (weight + reps together), not a literal same-plates check —
+  // catches the case where the weight never moved but reps have been quietly sliding too.
+  const recentE1rms = distinctDates.slice(0, 3).map((d) => {
+    const top = history.filter((e) => e.date === d).reduce((best, e) => (e.weight > best.weight ? e : best));
+    return estE1RM(top.weight, top.reps);
+  });
+  const maxE = Math.max(...recentE1rms), minE = Math.min(...recentE1rms);
+  if (!maxE) return false;
+  return (maxE - minE) / maxE <= 0.03;
 }
 
 // Prefer the last ~60 days of working-set data when there's enough of it, so a hot streak (or a
@@ -280,6 +319,22 @@ const IMPORT_SKIPPED = [
   "Leg Extensions 150 lbs — no date given",
 ];
 
+// Second one-time batch — Incline Bench history from a separate written log. Reps/sets weren't
+// recorded for most of these, so per your call: assumed 6 reps x 3 sets for every entry except
+// 1/19, which explicitly said "2x".
+const INCLINE_IMPORT_DATA = [
+  { date: "2025-09-08", workoutId: "push", exercise: "Incline Bench", weight: 155, reps: 6, sets: 3 },
+  { date: "2025-09-30", workoutId: "push", exercise: "Incline Bench", weight: 165, reps: 6, sets: 3 },
+  { date: "2025-10-02", workoutId: "push", exercise: "Incline Bench", weight: 190, reps: 6, sets: 3 },
+  { date: "2025-10-09", workoutId: "push", exercise: "Incline Bench", weight: 200, reps: 6, sets: 3 },
+  { date: "2025-10-14", workoutId: "push", exercise: "Incline Bench", weight: 205, reps: 6, sets: 3 },
+  { date: "2025-10-16", workoutId: "push", exercise: "Incline Bench (DB)", weight: 65, reps: 6, sets: 3 },
+  { date: "2025-10-24", workoutId: "push", exercise: "Incline Bench", weight: 215, reps: 6, sets: 3 },
+  { date: "2026-01-19", workoutId: "push", exercise: "Incline Bench", weight: 225, reps: 2, sets: 3 },
+  { date: "2026-02-02", workoutId: "push", exercise: "Incline Bench (DB)", weight: 85, reps: 6, sets: 3 },
+  { date: "2026-08-08", workoutId: "push", exercise: "Incline Bench", weight: 185, reps: 6, sets: 3 },
+];
+
 function Sparkline({ points, color }) {
   if (points.length < 2) return null;
   const vals = points.map((p) => p.e1rm);
@@ -320,8 +375,11 @@ function IconBook({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><p
 
 function PortfolioChart({ rows, color, onScrub }) {
   const [activeIndex, setActiveIndex] = useState(null);
+  const [primed, setPrimed] = useState(false);
   const svgRef = useRef(null);
   const draggingRef = useRef(false);
+  const holdTimerRef = useRef(null);
+  const downPosRef = useRef(null);
   const W = 340, H = 170, padL = 4, padR = 4, padT = 10, padB = 4;
   if (rows.length < 2) return <div className="empty">Log more sessions across a few exercises to see this.</div>;
   const vals = rows.map((r) => r.value);
@@ -346,19 +404,46 @@ function PortfolioChart({ rows, color, onScrub }) {
     setActiveIndex(idx);
     if (onScrub) onScrub(rows[idx]);
   };
-  const startScrub = (e) => { draggingRef.current = true; scrubTo(e.clientX); };
-  const moveScrub = (e) => { if (draggingRef.current) scrubTo(e.clientX); };
-  const endScrub = () => { draggingRef.current = false; };
+  const clearHoldTimer = () => { if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; } };
+
+  // Mouse (trackpad/laptop) has no native-scroll conflict — scrub immediately, same as before.
+  // Touch shares this element with the swipeable carousel, so a quick swipe must be left alone
+  // for the page-change gesture; only a brief hold-still arms scrubbing.
+  const startScrub = (e) => {
+    if (e.pointerType !== "touch") {
+      draggingRef.current = true;
+      setPrimed(true);
+      scrubTo(e.clientX);
+      return;
+    }
+    downPosRef.current = { x: e.clientX, y: e.clientY };
+    clearHoldTimer();
+    holdTimerRef.current = setTimeout(() => {
+      draggingRef.current = true;
+      setPrimed(true);
+      scrubTo(e.clientX);
+    }, 220);
+  };
+  const moveScrub = (e) => {
+    if (draggingRef.current) { scrubTo(e.clientX); return; }
+    if (e.pointerType === "touch" && downPosRef.current) {
+      const dx = Math.abs(e.clientX - downPosRef.current.x), dy = Math.abs(e.clientY - downPosRef.current.y);
+      if (dx > 8 || dy > 8) clearHoldTimer(); // real movement before the hold completes = a swipe, let it pass through
+    }
+  };
+  const endScrub = () => { clearHoldTimer(); draggingRef.current = false; downPosRef.current = null; setPrimed(false); };
 
   const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
   const areaPts = `${x(0)},${H} ${pts} ${x(n - 1)},${H}`;
   const active = activeIndex !== null ? { x: x(activeIndex), y: y(rows[activeIndex].value) } : null;
+  const avgValue = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const avgY = y(avgValue);
 
   return (
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      style={{ width: "100%", height: 190, touchAction: "none", cursor: "crosshair" }}
+      style={{ width: "100%", height: 190, touchAction: primed ? "none" : "auto", cursor: "crosshair" }}
       onPointerDown={startScrub}
       onPointerMove={moveScrub}
       onPointerUp={endScrub}
@@ -387,6 +472,7 @@ function PortfolioChart({ rows, color, onScrub }) {
       <g clipPath="url(#portfolioAreaClip)" mask="url(#portfolioFadeMask)">
         <rect x="0" y="0" width={W} height={H} fill="url(#portfolioDots)" />
       </g>
+      <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--mute)" strokeWidth="1.25" strokeDasharray="4,3" opacity="0.55" />
       <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {active && (
         <g>
@@ -399,8 +485,8 @@ function PortfolioChart({ rows, color, onScrub }) {
   );
 }
 
-function RadarChart({ data }) {
-  // data: [{ label, value }] — value is % growth, can be negative
+function RadarChart({ data, rangeLabel, onTap }) {
+  // data: [{ label, value, hasData }] — value is % growth, can be negative
   const W = 320, H = 260, cx = 160, cy = 130, outerR = 90;
   const n = data.length;
   const vals = data.map((d) => d.value);
@@ -416,7 +502,7 @@ function RadarChart({ data }) {
   const zeroR = radius(0);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 260 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 260, cursor: "pointer" }} onClick={onTap}>
       {ringLevels.map((lvl, ri) => {
         const ringPts = data.map((_, i) => pt(i, outerR * lvl).join(",")).join(" ");
         return <polygon key={ri} points={ringPts} fill="none" stroke="var(--border)" strokeWidth="1" />;
@@ -429,7 +515,11 @@ function RadarChart({ data }) {
         <polygon points={data.map((_, i) => pt(i, zeroR).join(",")).join(" ")} fill="none" stroke="var(--mute)" strokeWidth="1" strokeDasharray="3,3" />
       )}
       <polygon points={dataPath} fill="var(--iron)" fillOpacity="0.2" stroke="var(--iron)" strokeWidth="2" strokeLinejoin="round" />
-      {dataPts.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="3.5" fill="var(--iron)" />)}
+      {dataPts.map(([x, y], i) => (
+        data[i].hasData
+          ? <circle key={i} cx={x} cy={y} r="3.5" fill="var(--iron)" />
+          : <circle key={i} cx={x} cy={y} r="4" fill="var(--ink)" stroke="var(--mute)" strokeWidth="1.5" strokeDasharray="2,2" />
+      ))}
       {data.map((d, i) => {
         const [lx, ly] = pt(i, outerR + 22);
         return <text key={i} x={lx} y={ly} fontSize="10" fontWeight="700" fill="var(--chalk)" textAnchor="middle" dominantBaseline="central">{d.label}</text>;
@@ -438,7 +528,7 @@ function RadarChart({ data }) {
   );
 }
 
-function VolumeBarChart({ weeks }) {
+function VolumeBarChart({ weeks, onTapBar }) {
   const W = 340, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
   const max = Math.max(...weeks.map((w) => w.volume), 1);
   const n = weeks.length;
@@ -452,8 +542,9 @@ function VolumeBarChart({ weeks }) {
       {weeks.map((w, i) => {
         const h = (w.volume / max) * (H - padT - padB);
         const x = padL + i * ((W - padL - padR) / n) + 3;
-        return <g key={i}>
-          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--iron)" />
+        return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
+          <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
+          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill={w.isCurrent ? "#1d5f8a" : "var(--iron)"} />
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--mute)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
@@ -461,33 +552,22 @@ function VolumeBarChart({ weeks }) {
   );
 }
 
-function ConsistencyHeatmap({ weeks }) {
+function ConsistencyHeatmap({ weeks, onTap }) {
   // weeks: [[{date, count}, ...7 days], ...]
-  const cell = 15, gap = 3;
+  const cell = 20, gap = 4;
   const W = weeks.length * (cell + gap);
   const H = 7 * (cell + gap);
   const colorFor = (count) => (count === 0 ? "var(--border)" : count === 1 ? "#7a3a10" : count === 2 ? "#b5540f" : "var(--iron)");
   return (
-    <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 130 }}>
+    <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
       {weeks.map((week, wi) => week.map((day, di) => (
-        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="3" fill={colorFor(day.count)} />
+        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={colorFor(day.count)} />
       )))}
     </svg>
   );
 }
 
 export default function Home() {
-  useEffect(() => {
-    const applyTheme = () => {
-      const hour = new Date().getHours();
-      const isDay = hour >= 7 && hour < 19;
-      document.documentElement.dataset.theme = isDay ? "light" : "dark";
-    };
-    applyTheme();
-    const interval = setInterval(applyTheme, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   const [passcode, setPasscode] = useState(null);
   const [passInput, setPassInput] = useState("");
   const [authError, setAuthError] = useState(null);
@@ -507,7 +587,6 @@ export default function Home() {
 
   const [showWorkoutMenu, setShowWorkoutMenu] = useState(false);
   const [newWorkoutName, setNewWorkoutName] = useState("");
-  const [showMenu, setShowMenu] = useState(false);
 
   const [form, setForm] = useState({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false });
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -684,6 +763,21 @@ export default function Home() {
   const deleteEntry = (id) => persist({ workouts, exercises, entries: entries.filter((e) => e.id !== id) });
   const toggleWarmup = (id) => persist({ workouts, exercises, entries: entries.map((e) => (e.id === id ? { ...e, isWarmup: !e.isWarmup } : e)) });
 
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ weight: "", reps: "", sets: "" });
+  const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(entry.weight), reps: String(entry.reps), sets: String(entry.sets) }); };
+  const cancelEdit = () => setEditingId(null);
+  const saveEdit = (id) => {
+    if (!editForm.weight) return;
+    persist({
+      workouts, exercises,
+      entries: entries.map((e) => (e.id === id
+        ? { ...e, weight: Number(editForm.weight), reps: editForm.reps ? Number(editForm.reps) : 0, sets: editForm.sets ? Number(editForm.sets) : 1 }
+        : e)),
+    });
+    setEditingId(null);
+  };
+
   const entriesByExercise = useMemo(() => {
     const map = {};
     for (const e of entries) (map[e.exercise] = map[e.exercise] || []).push(e);
@@ -739,7 +833,7 @@ export default function Home() {
         return first ? ((last - first) / first) * 100 : 0;
       }).filter((v) => v !== null);
       const avg = perExercise.length ? Math.round(perExercise.reduce((a, b) => a + b, 0) / perExercise.length) : 0;
-      return { label: w.name, value: avg };
+      return { label: w.name, value: avg, hasData: perExercise.length > 0 };
     });
   }, [workouts, exercises, entriesByExerciseStrength]);
 
@@ -750,7 +844,7 @@ export default function Home() {
       const end = shiftDate(todayISO(), -i * 7);
       const start = shiftDate(end, -6);
       const vol = entries.filter((e) => e.date >= start && e.date <= end).reduce((sum, e) => sum + e.weight * e.sets * e.reps, 0);
-      weeks.push({ label: `W${numWeeks - i}`, volume: vol });
+      weeks.push({ label: `W${numWeeks - i}`, volume: vol, start, end, isCurrent: i === 0 });
     }
     return weeks;
   }, [entries]);
@@ -770,6 +864,16 @@ export default function Home() {
     }
     return weeks;
   }, [entries]);
+
+  const allTimeRange = useMemo(() => {
+    if (!entries.length) return null;
+    const dates = entries.map((e) => e.date).sort();
+    return { start: dates[0], end: dates[dates.length - 1] };
+  }, [entries]);
+
+  const [radarInfoOpen, setRadarInfoOpen] = useState(false);
+  const [volumeTapInfo, setVolumeTapInfo] = useState(null);
+  const [heatmapInfoOpen, setHeatmapInfoOpen] = useState(false);
 
   const [carouselPage, setCarouselPage] = useState(0);
   const carouselRef = useRef(null);
@@ -841,9 +945,15 @@ export default function Home() {
       baseline[ex] = estE1RM(firstEntry.weight, firstEntry.reps);
     });
 
-    const allDatesSet = new Set();
-    exNames.forEach((ex) => Object.keys(perExercise[ex]).forEach((d) => allDatesSet.add(d)));
-    const allDates = Array.from(allDatesSet).sort();
+    const sparseDatesSet = new Set();
+    exNames.forEach((ex) => Object.keys(perExercise[ex]).forEach((d) => sparseDatesSet.add(d)));
+    const sparseDates = Array.from(sparseDatesSet).sort();
+
+    // One row per calendar day, not just days you logged something — a rest day (or a lift you
+    // haven't touched in a while) carries its value forward flat, same as a stock that didn't
+    // trade still holds its last price. The line only moves on an actual new result.
+    const allDates = [];
+    for (let d = sparseDates[0]; d <= todayISO(); d = shiftDate(d, 1)) allDates.push(d);
 
     const lastKnown = {};
     const rows = allDates.map((date) => {
@@ -860,6 +970,25 @@ export default function Home() {
   }, [strengthEntries]);
 
   const portfolioCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === portfolioRange).days), [portfolioRange]);
+
+  // Flags an unusually large single-session swing in the Overall index, and — when it can —
+  // names a likely driver: an exercise with a thin logged history swings the blended average
+  // more than one of your regulars would, since it has less of its own trend to anchor against.
+  const fluctuationInsight = useMemo(() => {
+    const rows = portfolioSeries.rows;
+    if (rows.length < 2) return null;
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    const delta = Math.round((last.value - prev.value) * 10) / 10;
+    if (Math.abs(delta) < 5) return null;
+    const todaysExercises = strengthEntries.filter((e) => e.date === last.date).map((e) => e.exercise);
+    const thin = todaysExercises.find((ex) => (entriesByExerciseStrength[ex] || []).length <= 4);
+    const direction = delta > 0 ? "jumped" : "dropped";
+    let text = `Overall ${direction} ${Math.abs(delta)} pts on ${last.label} — a bigger single-session swing than usual.`;
+    if (thin) text += ` ${thin} has a short logged history, which can swing the blended average more than a lift you train constantly.`;
+    return { type: delta > 0 ? "up" : "down", text };
+  }, [portfolioSeries, strengthEntries, entriesByExerciseStrength]);
+
   const portfolioFiltered = useMemo(() => {
     const rows = portfolioSeries.rows.filter((r) => r.date >= portfolioCutoff);
     return rows.length ? rows : portfolioSeries.rows.slice(-2);
@@ -1137,6 +1266,18 @@ export default function Home() {
     persist({ workouts, exercises: nextExercises, entries: [...newEntries, ...entries] });
   };
 
+  const alreadyImportedIncline = entries.some((e) => String(e.id).startsWith("import-incline-"));
+  const runInclineImport = () => {
+    if (alreadyImportedIncline) return;
+    const nextExercises = JSON.parse(JSON.stringify(exercises));
+    const newEntries = INCLINE_IMPORT_DATA.map((d, i) => {
+      const list = nextExercises[d.workoutId] || (nextExercises[d.workoutId] = []);
+      if (!list.some((e) => e.toLowerCase() === d.exercise.toLowerCase())) list.push(d.exercise);
+      return { id: `import-incline-${i}`, workoutId: d.workoutId, exercise: d.exercise, weight: d.weight, sets: d.sets, reps: d.reps, date: d.date };
+    });
+    persist({ workouts, exercises: nextExercises, entries: [...newEntries, ...entries] });
+  };
+
   const triggerDownload = (content, filename, type) => {
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
@@ -1176,33 +1317,28 @@ export default function Home() {
 
   return (
     <div className="wrap">
-      <header>
-        <div>
-          <div className="eyebrow"><span className="dot">●</span> Hooks Workout</div>
-          <button className="title-btn" onClick={() => { setShowWorkoutMenu((v) => !v); setShowMenu(false); }}>
-            {view === "portfolio" ? "Overall" : view === "home" ? activeWorkout?.name : view === "exercises" ? "Exercises" : view === "charts" ? "Progress" : view === "recommend" ? "Recommend" : view === "goal" ? "Goal Program" : view === "import" ? "Import" : "Export"}
-            {view === "home" && <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>}
-          </button>
-        </div>
-        <button className="icon-btn" onClick={() => { setShowMenu((v) => !v); setShowWorkoutMenu(false); }}>☰</button>
+      {view === "home" ? (
+        <header>
+          <div>
+            <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)}>
+              {activeWorkout?.name}
+              <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
+            </button>
+          </div>
 
-        {showWorkoutMenu && view === "home" && (
-          <div className="dropdown left">
-            {workouts.map((w) => (
-              <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
-            ))}
-            <div className="new-row">
-              <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
-              <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
+          {showWorkoutMenu && (
+            <div className="dropdown left">
+              {workouts.map((w) => (
+                <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
+              ))}
+              <div className="new-row">
+                <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
+                <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
+              </div>
             </div>
-          </div>
-        )}
-        {showMenu && (
-          <div className="dropdown right">
-            <button className="item" style={{ color: view === "export" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setView("export"); setShowMenu(false); }}>Export / backup</button>
-          </div>
-        )}
-      </header>
+          )}
+        </header>
+      ) : null}
 
       {saveError && <div className="warn">{saveError}</div>}
 
@@ -1242,20 +1378,35 @@ export default function Home() {
 
             <div className="chart-carousel-page">
               <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Strength growth by category</div>
-              <RadarChart data={radarData} />
-              <div className="axis-caption">Average % change in estimated 1RM across each workout's exercises, all-time</div>
+              <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
+              {radarInfoOpen && allTimeRange && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
+                </div>
+              )}
+              <div className="axis-caption">Average % change in estimated 1RM across each workout's exercises, all-time — tap the chart for the exact span, hollow points mean not enough data yet</div>
             </div>
 
             <div className="chart-carousel-page">
-              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Weekly training volume</div>
-              <VolumeBarChart weeks={weeklyVolume} />
-              <div className="axis-caption">Total weight × sets × reps logged each week, last 8 weeks</div>
+              <div style={{ background: "#1d5f8a", color: "#fff", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", padding: "10px 0", borderRadius: 4, marginBottom: 10 }}>This Week</div>
+              <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
+              {volumeTapInfo && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {volumeTapInfo.label}: {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}
+                </div>
+              )}
+              <div className="axis-caption">Total weight × sets × reps logged each week, last 8 weeks — tap a bar for its exact dates</div>
             </div>
 
             <div className="chart-carousel-page">
               <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Training consistency</div>
-              <ConsistencyHeatmap weeks={heatmapWeeks} />
-              <div className="axis-caption">Darker = more sets logged that day, last 10 weeks</div>
+              <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
+              {heatmapInfoOpen && heatmapWeeks.length > 0 && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(heatmapWeeks[heatmapWeeks.length - 1][6].date)}
+                </div>
+              )}
+              <div className="axis-caption">Darker = more sets logged that day, last 10 weeks — tap the grid for the exact span</div>
             </div>
           </div>
 
@@ -1321,10 +1472,10 @@ export default function Home() {
             </div>
           )}
 
-          {insights.length > 0 && (
+          {(insights.length > 0 || fluctuationInsight) && (
             <div style={{ marginTop: 18 }}>
               <div className="label-sm" style={{ marginBottom: 10 }}>Insights</div>
-              {insights.map((ins, i) => {
+              {[...(fluctuationInsight ? [fluctuationInsight] : []), ...insights].map((ins, i) => {
                 const dotColor = ins.type === "up" || ins.type === "strongest" ? "#22c55e" : ins.type === "down" ? "#ef4444" : "var(--iron)";
                 return (
                   <div key={i} className="insight-item">
@@ -1394,10 +1545,25 @@ export default function Home() {
               <div className="label-sm">Logged — {fmtDateFull(selectedDate)}</div>
               <div className="today-list">
                 {todaysEntries.map((e) => (
-                  <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
-                    <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: 10, fontWeight: 400 }}> (warm-up)</span>}</span>
-                    <span className="num">{e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}<button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button><button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button></span>
-                  </div>
+                  editingId === e.id ? (
+                    <div key={e.id} className="today-item" style={{ flexWrap: "wrap", gap: 6 }}>
+                      <span style={{ fontWeight: 600 }}>{e.exercise}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 52, padding: "4px 6px", fontSize: 13 }} />
+                        <span className="muted" style={{ fontSize: 11 }}>lbs ×</span>
+                        <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 40, padding: "4px 6px", fontSize: 13 }} />
+                        <span className="muted" style={{ fontSize: 11 }}>×</span>
+                        <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 6px", fontSize: 13 }} />
+                        <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "#22c55e", fontWeight: 700 }}>✓</button>
+                        <button className="del-btn" onClick={cancelEdit}>✕</button>
+                      </span>
+                    </div>
+                  ) : (
+                    <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
+                      <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: 10, fontWeight: 400 }}> (warm-up)</span>}</span>
+                      <span className="num">{e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}<button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button><button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button><button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button></span>
+                    </div>
+                  )
                 ))}
               </div>
             </div>
@@ -1433,15 +1599,31 @@ export default function Home() {
                 {isOpen && history.length > 0 && (
                   <div className="ex-hist">
                     {history.slice(0, 8).map((e) => (
-                      <div key={e.id} className="hist-item">
-                        <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
-                        <span className="num" style={{ opacity: e.isWarmup ? 0.55 : 1 }}>
-                          {e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}
-                          {e.isWarmup && <span className="muted" style={{ fontSize: 10 }}> (warm-up)</span>}
-                        </span>
-                        <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
-                        <button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button>
-                      </div>
+                      editingId === e.id ? (
+                        <div key={e.id} className="hist-item" style={{ flexWrap: "wrap", gap: 4 }}>
+                          <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 48, padding: "3px 5px", fontSize: 12 }} />
+                            <span className="muted" style={{ fontSize: 10 }}>×</span>
+                            <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
+                            <span className="muted" style={{ fontSize: 10 }}>×</span>
+                            <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
+                            <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "#22c55e", fontWeight: 700 }}>✓</button>
+                            <button className="del-btn" onClick={cancelEdit}>✕</button>
+                          </span>
+                        </div>
+                      ) : (
+                        <div key={e.id} className="hist-item">
+                          <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
+                          <span className="num" style={{ opacity: e.isWarmup ? 0.55 : 1 }}>
+                            {e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}
+                            {e.isWarmup && <span className="muted" style={{ fontSize: 10 }}> (warm-up)</span>}
+                          </span>
+                          <button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button>
+                          <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
+                          <button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button>
+                        </div>
+                      )
                     ))}
                   </div>
                 )}
@@ -1642,10 +1824,15 @@ export default function Home() {
               {IMPORT_SKIPPED.map((s, i) => <div key={i} style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.5 }}>• {s}</div>)}
             </div>
           </div>
-        </>
-      ) : (
-        <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <div className="card">
+            <div className="label-sm">Incline Bench history</div>
+            <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+              Loads {INCLINE_IMPORT_DATA.length} sets, Sep 2025 – Aug 2026. Reps weren't recorded for most of these — assumed 6 reps × 3 sets throughout, except 1/19 which was noted as 2 reps. Dumbbell sets file separately under "Incline Bench (DB)".
+            </div>
+            <button className="btn-iron save-btn" onClick={runInclineImport} disabled={alreadyImportedIncline} style={{ opacity: alreadyImportedIncline ? 0.5 : 1, cursor: alreadyImportedIncline ? "default" : "pointer" }}>
+              {alreadyImportedIncline ? "Already Imported" : `Import ${INCLINE_IMPORT_DATA.length} Sets`}
+            </button>
+          </div>
           <div className="card">
             <div className="label-sm">Full backup</div>
             <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
@@ -1664,7 +1851,9 @@ export default function Home() {
             No auto-email yet — that needs a mail-sending service wired in (Resend is the simplest option, free tier covers this easily). Downloading and attaching it to an email yourself takes 10 seconds; say the word if you want the automatic version built in.
           </div>
         </>
-      )}
+      ) : null}
+
+
 
       <div className="bottom-nav">
         <button className={"bottom-nav-item" + (view === "portfolio" ? " active" : "")} onClick={() => setView("portfolio")}>
