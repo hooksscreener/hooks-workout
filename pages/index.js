@@ -451,8 +451,8 @@ function PortfolioChart({ rows, color, onScrub }) {
     >
       <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
       <defs>
-        <pattern id="portfolioDots" patternUnits="userSpaceOnUse" width="5" height="5">
-          <circle cx="1" cy="1" r="0.8" fill={color} />
+        <pattern id="portfolioDots" patternUnits="userSpaceOnUse" width="3.2" height="3.2">
+          <circle cx="1" cy="1" r="0.9" fill={color} />
         </pattern>
         <linearGradient id="portfolioFade" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="white" stopOpacity="1" />
@@ -472,7 +472,7 @@ function PortfolioChart({ rows, color, onScrub }) {
       <g clipPath="url(#portfolioAreaClip)" mask="url(#portfolioFadeMask)">
         <rect x="0" y="0" width={W} height={H} fill="url(#portfolioDots)" />
       </g>
-      <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--mute)" strokeWidth="1.25" strokeDasharray="4,3" opacity="0.55" />
+      <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="#ffffff" strokeWidth="1.25" strokeDasharray="1,3" strokeLinecap="round" opacity="0.65" />
       <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {active && (
         <g>
@@ -593,6 +593,23 @@ export default function Home() {
   const [addingExercise, setAddingExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState("");
   const [expandedExercise, setExpandedExercise] = useState(null);
+  const azRefs = useRef({});
+  const azStripRef = useRef(null);
+  const scrollToLetter = (letter) => {
+    const el = azRefs.current[letter];
+    if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
+  };
+  const azPointerToLetter = (clientY) => {
+    const strip = azStripRef.current;
+    if (!strip) return null;
+    const rect = strip.getBoundingClientRect();
+    const idx = Math.min(25, Math.max(0, Math.floor(((clientY - rect.top) / rect.height) * 26)));
+    return "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[idx];
+  };
+  const azDragging = useRef(false);
+  const azStart = (e) => { azDragging.current = true; const l = azPointerToLetter(e.clientY); if (l) scrollToLetter(l); };
+  const azMove = (e) => { if (azDragging.current) { const l = azPointerToLetter(e.clientY); if (l) scrollToLetter(l); } };
+  const azEnd = () => { azDragging.current = false; };
 
   const [chartScope, setChartScope] = useState("ALL");
   const [chartFocusExercise, setChartFocusExercise] = useState(null);
@@ -877,12 +894,28 @@ export default function Home() {
 
   const [carouselPage, setCarouselPage] = useState(0);
   const carouselRef = useRef(null);
+  const carouselLastInteraction = useRef(Date.now());
   const onCarouselScroll = () => {
     const el = carouselRef.current;
     if (!el) return;
     const page = Math.round(el.scrollLeft / el.clientWidth);
     setCarouselPage(page);
   };
+  const resetCarouselAutoplay = () => { carouselLastInteraction.current = Date.now(); };
+  useEffect(() => {
+    const CAROUSEL_PAGE_COUNT = 4;
+    const AUTOPLAY_MS = 10000;
+    const interval = setInterval(() => {
+      const el = carouselRef.current;
+      if (!el) return;
+      if (Date.now() - carouselLastInteraction.current >= AUTOPLAY_MS) {
+        const nextPage = (Math.round(el.scrollLeft / el.clientWidth) + 1) % CAROUSEL_PAGE_COUNT;
+        el.scrollTo({ left: nextPage * el.clientWidth, behavior: "smooth" });
+        carouselLastInteraction.current = Date.now();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const insights = useMemo(() => {
     const list = [];
@@ -1007,26 +1040,34 @@ export default function Home() {
     return portfolioFiltered.map((r) => ({ date: r.date, label: r.label, value: Math.round(((r.value - first) / first) * 1000) / 10 }));
   }, [portfolioFiltered]);
 
+  // Auto-scroll drives a transform on the inner track rather than native scrollLeft — animating
+  // scrollLeft via JS on a momentum-scroll container is unreliable on iOS Safari specifically
+  // (the browser's own scroll physics can silently fight or drop the writes), which is exactly
+  // why this moved fine on a laptop but sat still on a phone. A transform runs on the compositor
+  // thread the same way on every browser, iOS included.
+  const tickerOuterRef = useRef(null);
   const tickerTrackRef = useRef(null);
+  const tickerOffsetRef = useRef(0);
   const tickerPausedRef = useRef(false);
   const tickerResumeTimeout = useRef(null);
   const tickerDraggingRef = useRef(false);
   const tickerDragStartX = useRef(0);
-  const tickerDragStartScroll = useRef(0);
+  const tickerDragStartOffset = useRef(0);
   const tickerLastInteraction = useRef(0);
   useEffect(() => {
     let rafId;
     const step = () => {
-      const el = tickerTrackRef.current;
+      const outer = tickerOuterRef.current, inner = tickerTrackRef.current;
       // Safety net: never stay paused more than 4s, even if a pointerup/touchend event got dropped
       // (happens occasionally on iOS Safari) — self-heals instead of freezing permanently.
       if (tickerPausedRef.current && Date.now() - tickerLastInteraction.current > 4000) {
         tickerPausedRef.current = false;
       }
-      if (el && !tickerPausedRef.current && el.scrollWidth > el.clientWidth) {
-        el.scrollLeft += 0.98;
-        const half = el.scrollWidth / 2;
-        if (el.scrollLeft >= half) el.scrollLeft -= half;
+      if (outer && inner && !tickerPausedRef.current && inner.scrollWidth > outer.clientWidth) {
+        tickerOffsetRef.current -= 0.98;
+        const half = inner.scrollWidth / 2;
+        if (Math.abs(tickerOffsetRef.current) >= half) tickerOffsetRef.current += half;
+        inner.style.transform = `translateX(${tickerOffsetRef.current}px)`;
       }
       rafId = requestAnimationFrame(step);
     };
@@ -1047,15 +1088,17 @@ export default function Home() {
     if (e.pointerType === "mouse") {
       tickerDraggingRef.current = true;
       tickerDragStartX.current = e.clientX;
-      tickerDragStartScroll.current = tickerTrackRef.current ? tickerTrackRef.current.scrollLeft : 0;
+      tickerDragStartOffset.current = tickerOffsetRef.current;
     }
   };
   const tickerPointerMove = (e) => {
     if (!tickerDraggingRef.current || e.pointerType !== "mouse" || !tickerTrackRef.current) return;
     tickerLastInteraction.current = Date.now();
-    tickerTrackRef.current.scrollLeft = tickerDragStartScroll.current - (e.clientX - tickerDragStartX.current);
+    tickerOffsetRef.current = tickerDragStartOffset.current + (e.clientX - tickerDragStartX.current);
+    tickerTrackRef.current.style.transform = `translateX(${tickerOffsetRef.current}px)`;
   };
   const tickerPointerUp = () => { tickerDraggingRef.current = false; scheduleTickerResume(); };
+
 
   const rangeCutoff = useMemo(() => shiftDate(todayISO(), -RANGE_PRESETS.find((r) => r.key === chartRange).days), [chartRange]);
 
@@ -1317,7 +1360,7 @@ export default function Home() {
 
   return (
     <div className="wrap">
-      {view === "home" ? (
+      {view === "home" || view === "recommend" ? (
         <header>
           <div>
             <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)}>
@@ -1346,7 +1389,7 @@ export default function Home() {
         <div className="empty">Loading your log…</div>
       ) : view === "portfolio" ? (
         <>
-          <div className="chart-carousel" ref={carouselRef} onScroll={onCarouselScroll}>
+          <div className="chart-carousel" ref={carouselRef} onScroll={onCarouselScroll} onPointerDown={resetCarouselAutoplay} onTouchStart={resetCarouselAutoplay}>
             <div className="chart-carousel-page">
               <div className="portfolio-change">
                 {scrubPoint ? (
@@ -1431,7 +1474,7 @@ export default function Home() {
             ) : (
               <div
                 className="ticker-track-outer"
-                ref={tickerTrackRef}
+                ref={tickerOuterRef}
                 style={{ cursor: "grab" }}
                 onPointerDown={tickerPointerDown}
                 onPointerMove={tickerPointerMove}
@@ -1440,7 +1483,7 @@ export default function Home() {
                 onTouchStart={pauseTicker}
                 onTouchEnd={scheduleTickerResume}
               >
-                <div className="ticker-track">
+                <div className="ticker-track" ref={tickerTrackRef}>
                   {[...tickerSeries, ...tickerSeries].map((s, i) => (
                     <TickerItem key={i} series={s} onClick={() => { setChartFocusExercise(s.exercise); setView("charts"); }} />
                   ))}
@@ -1492,7 +1535,7 @@ export default function Home() {
             <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
           </button>
         </>
-      ) : view === "home" ? (
+      ) : view === "home" || view === "recommend" ? (
         <>
           <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
           <div className="date-row">
@@ -1568,68 +1611,165 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+            <div className="label-sm" style={{ marginBottom: 10 }}>Recommended for today</div>
+            <div className="ex-input-wrap">
+              <input
+                className="ex-input"
+                placeholder="Search an exercise…"
+                value={recExercise ? recExercise : recSearch}
+                onChange={(e) => { setRecSearch(e.target.value); setRecExercise(null); setManualWeight(""); setManualReps(""); setRecSuggestOpen(true); }}
+                onFocus={(e) => { setRecSuggestOpen(true); setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 300); }}
+                onBlur={() => setTimeout(() => setRecSuggestOpen(false), 150)}
+              />
+              {recSuggestOpen && recSuggestions.length > 0 && (
+                <div className="suggestions">
+                  {recSuggestions.map((name) => (
+                    <button key={name} onClick={() => { setRecExercise(name); setRecSearch(""); setManualWeight(""); setManualReps(""); setRecSuggestOpen(false); }}>{name}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pills" style={{ marginBottom: recExercise ? 12 : 16 }}>
+              <button className={"pill" + (progressionMode === "weight" ? " active" : "")} onClick={() => setProgressionModeAndSave("weight")}>Increase Weight</button>
+              <button className={"pill" + (progressionMode === "reps" ? " active" : "")} onClick={() => setProgressionModeAndSave("reps")}>Increase Reps</button>
+            </div>
+            <div className="axis-caption" style={{ marginTop: -6, marginBottom: 14 }}>
+              {progressionMode === "weight"
+                ? "Same weight until you hit 12 reps, then weight goes up and reps reset to 8."
+                : "Weight stays put — this only tracks how many reps you can add over time. Switch back to Increase Weight whenever you're ready."}
+            </div>
+
+            {recExercise && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--mute)" }}>Sets today</span>
+                <button className="pill" onClick={() => setRecSets((n) => Math.max(1, n - 1))}>−</button>
+                <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, minWidth: 18, textAlign: "center" }}>{recSets}</span>
+                <button className="pill" onClick={() => setRecSets((n) => Math.min(8, n + 1))}>+</button>
+              </div>
+            )}
+
+            {!recExercise ? (
+              <div className="empty">Pick an exercise to see a suggested weight for today.</div>
+            ) : recommendation?.noData ? (
+              <div className="card">
+                <div className="label-sm">What's your strongest set?</div>
+                <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+                  No sets logged for {recExercise} yet. Enter the most weight you've lifted for it and how many reps — that's enough to build a first recommendation.
+                </div>
+                <div className="row3" style={{ marginBottom: 0 }}>
+                  <input type="number" inputMode="decimal" placeholder="lbs" value={manualWeight} onChange={(e) => setManualWeight(e.target.value)} />
+                  <input type="number" inputMode="numeric" placeholder="reps" value={manualReps} onChange={(e) => setManualReps(e.target.value)} />
+                </div>
+              </div>
+            ) : recommendation && (
+              <div className="card">
+                <div className="label-sm">
+                  {recommendation.fromManual ? "Strongest set" : `Last logged ${fmtDate(recommendation.lastSessionDate)}`} · {recommendation.lastTop.weight} lbs × {recommendation.lastTop.reps}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--chalk)", marginBottom: 14, lineHeight: 1.5 }}>{recommendation.note}</div>
+                <div className="today-list">
+                  {recommendation.rows.map((r) => (
+                    <div key={r.set} className="today-item">
+                      <span style={{ fontWeight: 600 }}>Set {r.set}{r.set === 1 ? " (top)" : ""}</span>
+                      <span className="num">{r.weight}<span className="muted">lbs</span><span className="muted">× {recommendation.repLow}–{recommendation.repHigh}</span></span>
+                    </div>
+                  ))}
+                </div>
+                <div className="chart-note" style={{ marginTop: 14 }}>
+                  {recommendation.basedOnActualSets
+                    ? "Backoff weights are modeled on your own logged set-by-set drop-off last session."
+                    : "Backoff weights use a standard pyramid (90% / 85% / 80%…) — a solid estimate from a single logged set."}
+                  {" "}Double progression: same weight until you hit {recommendation.repHigh} reps on the top set, then the weight goes up and reps reset to {recommendation.repLow}. This is a starting point — listen to how the weight actually feels that day.
+                </div>
+              </div>
+            )}
+          </div>
         </>
       ) : view === "exercises" ? (
         <>
           <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
-          {activeList.map((ex) => {
-            const history = entriesByExercise[ex] || [];
-            const strengthHistory = history.filter((e) => !e.isWarmup);
-            const best = strengthHistory.reduce((m, e) => Math.max(m, e.weight), 0);
-            const isOpen = expandedExercise === ex;
-            const plateaued = plateauFlag(strengthHistory);
-            return (
-              <div key={ex} className="ex-card">
-                <div className="ex-head" style={{ cursor: "pointer" }} onClick={() => setExpandedExercise(isOpen ? null : ex)}>
-                  <div className="badge" style={{ background: best ? "var(--badge-on)" : "var(--surface-3)", border: `2px solid ${best ? "var(--iron)" : "var(--border)"}`, color: best ? "var(--iron)" : "var(--mute)" }}>{best || "—"}</div>
-                  <div style={{ flex: 1 }}>
-                    <div className="ex-name">{ex}</div>
-                    <div className="ex-meta">{history.length ? `${history.length} logged · last ${fmtDate(history[0].date)}` : "no sets logged yet"}</div>
-                    {plateaued && <div style={{ fontSize: 11, fontWeight: 700, color: "var(--iron)", marginTop: 3 }}>⚠ Same top weight 3 sessions running — consider adding weight</div>}
+          <div style={{ paddingRight: 26 }}>
+          {(() => {
+            const sorted = [...activeList].sort((a, b) => a.localeCompare(b));
+            const seenLetters = new Set();
+            return sorted.map((ex) => {
+              const letter = ex[0]?.toUpperCase() || "#";
+              const isFirstOfLetter = !seenLetters.has(letter);
+              seenLetters.add(letter);
+              const history = entriesByExercise[ex] || [];
+              const strengthHistory = history.filter((e) => !e.isWarmup);
+              const best = strengthHistory.reduce((m, e) => Math.max(m, e.weight), 0);
+              const isOpen = expandedExercise === ex;
+              const plateaued = plateauFlag(strengthHistory);
+              return (
+                <div key={ex} className="ex-card" ref={isFirstOfLetter ? (el) => { azRefs.current[letter] = el; } : null}>
+                  <div className="ex-head" style={{ cursor: "pointer" }} onClick={() => setExpandedExercise(isOpen ? null : ex)}>
+                    <div className="badge" style={{ background: best ? "var(--badge-on)" : "var(--surface-3)", border: `2px solid ${best ? "var(--iron)" : "var(--border)"}`, color: best ? "var(--iron)" : "var(--mute)" }}>{best || "—"}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="ex-name">{ex}</div>
+                      <div className="ex-meta">{history.length ? `${history.length} logged · last ${fmtDate(history[0].date)}` : "no sets logged yet"}</div>
+                      {plateaued && <div style={{ fontSize: 11, fontWeight: 700, color: "var(--iron)", marginTop: 3 }}>⚠ Same top weight 3 sessions running — consider adding weight</div>}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeExerciseFromList(ex, activeWorkoutId); }}
+                      style={{ background: "none", border: "none", color: "var(--mute)", padding: 4, flexShrink: 0 }}
+                      aria-label={`Remove ${ex}`}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" /></svg>
+                    </button>
+                    <span style={{ color: "var(--mute)", transform: isOpen ? "rotate(180deg)" : "none", display: "inline-block" }}>▾</span>
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeExerciseFromList(ex, activeWorkoutId); }}
-                    style={{ background: "none", border: "none", color: "var(--mute)", padding: 4, flexShrink: 0 }}
-                    aria-label={`Remove ${ex}`}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" /></svg>
-                  </button>
-                  <span style={{ color: "var(--mute)", transform: isOpen ? "rotate(180deg)" : "none", display: "inline-block" }}>▾</span>
+                  {isOpen && history.length > 0 && (
+                    <div className="ex-hist">
+                      {history.slice(0, 8).map((e) => (
+                        editingId === e.id ? (
+                          <div key={e.id} className="hist-item" style={{ flexWrap: "wrap", gap: 4 }}>
+                            <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 48, padding: "3px 5px", fontSize: 12 }} />
+                              <span className="muted" style={{ fontSize: 10 }}>×</span>
+                              <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
+                              <span className="muted" style={{ fontSize: 10 }}>×</span>
+                              <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
+                              <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "#22c55e", fontWeight: 700 }}>✓</button>
+                              <button className="del-btn" onClick={cancelEdit}>✕</button>
+                            </span>
+                          </div>
+                        ) : (
+                          <div key={e.id} className="hist-item">
+                            <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
+                            <span className="num" style={{ opacity: e.isWarmup ? 0.55 : 1 }}>
+                              {e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}
+                              {e.isWarmup && <span className="muted" style={{ fontSize: 10 }}> (warm-up)</span>}
+                            </span>
+                            <button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button>
+                            <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
+                            <button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {isOpen && history.length > 0 && (
-                  <div className="ex-hist">
-                    {history.slice(0, 8).map((e) => (
-                      editingId === e.id ? (
-                        <div key={e.id} className="hist-item" style={{ flexWrap: "wrap", gap: 4 }}>
-                          <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 48, padding: "3px 5px", fontSize: 12 }} />
-                            <span className="muted" style={{ fontSize: 10 }}>×</span>
-                            <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
-                            <span className="muted" style={{ fontSize: 10 }}>×</span>
-                            <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 36, padding: "3px 5px", fontSize: 12 }} />
-                            <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "#22c55e", fontWeight: 700 }}>✓</button>
-                            <button className="del-btn" onClick={cancelEdit}>✕</button>
-                          </span>
-                        </div>
-                      ) : (
-                        <div key={e.id} className="hist-item">
-                          <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
-                          <span className="num" style={{ opacity: e.isWarmup ? 0.55 : 1 }}>
-                            {e.weight} <span className="muted">lbs ×</span> {e.reps}{e.sets > 1 && <span className="muted"> × {e.sets} sets</span>}
-                            {e.isWarmup && <span className="muted" style={{ fontSize: 10 }}> (warm-up)</span>}
-                          </span>
-                          <button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button>
-                          <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
-                          <button className="del-btn" onClick={() => deleteEntry(e.id)}>✕</button>
-                        </div>
-                      )
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
+          </div>
+          {activeList.length > 6 && (
+            <div
+              ref={azStripRef}
+              className="az-strip"
+              onPointerDown={azStart}
+              onPointerMove={azMove}
+              onPointerUp={azEnd}
+              onPointerLeave={azEnd}
+            >
+              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => <span key={l}>{l}</span>)}
+            </div>
+          )}
         </>
       ) : view === "charts" ? (
         <>
@@ -1663,82 +1803,6 @@ export default function Home() {
               <div className="chart-note">
                 {chartFocusExercise ? "This exercise's heaviest set logged each day. " : chartScope === "ALL" ? "Each line is a workout day's average top set across its exercises. " : "Each line is an exercise's heaviest set logged that day. "}
                 Tap a point for the exact reps, sets, and weight. {chartMetric === "e1rm" && "Est. 1RM uses the Epley formula from your top set's weight and reps."}
-              </div>
-            </div>
-          )}
-        </>
-      ) : view === "recommend" ? (
-        <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
-          <div className="ex-input-wrap">
-            <input
-              className="ex-input"
-              placeholder="Search an exercise…"
-              value={recExercise ? recExercise : recSearch}
-              onChange={(e) => { setRecSearch(e.target.value); setRecExercise(null); setManualWeight(""); setManualReps(""); setRecSuggestOpen(true); }}
-              onFocus={(e) => { setRecSuggestOpen(true); setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 300); }}
-              onBlur={() => setTimeout(() => setRecSuggestOpen(false), 150)}
-            />
-            {recSuggestOpen && recSuggestions.length > 0 && (
-              <div className="suggestions">
-                {recSuggestions.map((name) => (
-                  <button key={name} onClick={() => { setRecExercise(name); setRecSearch(""); setManualWeight(""); setManualReps(""); setRecSuggestOpen(false); }}>{name}</button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="pills" style={{ marginBottom: recExercise ? 12 : 16 }}>
-            <button className={"pill" + (progressionMode === "weight" ? " active" : "")} onClick={() => setProgressionModeAndSave("weight")}>Increase Weight</button>
-            <button className={"pill" + (progressionMode === "reps" ? " active" : "")} onClick={() => setProgressionModeAndSave("reps")}>Increase Reps</button>
-          </div>
-          <div className="axis-caption" style={{ marginTop: -6, marginBottom: 14 }}>
-            {progressionMode === "weight"
-              ? "Same weight until you hit 12 reps, then weight goes up and reps reset to 8."
-              : "Weight stays put — this only tracks how many reps you can add over time. Switch back to Increase Weight whenever you're ready."}
-          </div>
-
-          {recExercise && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--mute)" }}>Sets today</span>
-              <button className="pill" onClick={() => setRecSets((n) => Math.max(1, n - 1))}>−</button>
-              <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, minWidth: 18, textAlign: "center" }}>{recSets}</span>
-              <button className="pill" onClick={() => setRecSets((n) => Math.min(8, n + 1))}>+</button>
-            </div>
-          )}
-
-          {!recExercise ? (
-            <div className="empty">Pick an exercise to see a suggested weight for today.</div>
-          ) : recommendation?.noData ? (
-            <div className="card">
-              <div className="label-sm">What's your strongest set?</div>
-              <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
-                No sets logged for {recExercise} yet. Enter the most weight you've lifted for it and how many reps — that's enough to build a first recommendation.
-              </div>
-              <div className="row3" style={{ marginBottom: 0 }}>
-                <input type="number" inputMode="decimal" placeholder="lbs" value={manualWeight} onChange={(e) => setManualWeight(e.target.value)} />
-                <input type="number" inputMode="numeric" placeholder="reps" value={manualReps} onChange={(e) => setManualReps(e.target.value)} />
-              </div>
-            </div>
-          ) : recommendation && (
-            <div className="card">
-              <div className="label-sm">
-                {recommendation.fromManual ? "Strongest set" : `Last logged ${fmtDate(recommendation.lastSessionDate)}`} · {recommendation.lastTop.weight} lbs × {recommendation.lastTop.reps}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--chalk)", marginBottom: 14, lineHeight: 1.5 }}>{recommendation.note}</div>
-              <div className="today-list">
-                {recommendation.rows.map((r) => (
-                  <div key={r.set} className="today-item">
-                    <span style={{ fontWeight: 600 }}>Set {r.set}{r.set === 1 ? " (top)" : ""}</span>
-                    <span className="num">{r.weight}<span className="muted">lbs</span><span className="muted">× {recommendation.repLow}–{recommendation.repHigh}</span></span>
-                  </div>
-                ))}
-              </div>
-              <div className="chart-note" style={{ marginTop: 14 }}>
-                {recommendation.basedOnActualSets
-                  ? "Backoff weights are modeled on your own logged set-by-set drop-off last session."
-                  : "Backoff weights use a standard pyramid (90% / 85% / 80%…) — a solid estimate from a single logged set."}
-                {" "}Double progression: same weight until you hit {recommendation.repHigh} reps on the top set, then the weight goes up and reps reset to {recommendation.repLow}. This is a starting point — listen to how the weight actually feels that day.
               </div>
             </div>
           )}
