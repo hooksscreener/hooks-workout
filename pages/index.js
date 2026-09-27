@@ -366,20 +366,21 @@ function TickerItem({ series, onClick }) {
 }
 
 const NAV_ICON_PROPS = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
-function IconHome({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
+function IconHome({ color, size }) { return <svg {...NAV_ICON_PROPS} width={size || NAV_ICON_PROPS.width} height={size || NAV_ICON_PROPS.height} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
 function IconDumbbell({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color} style={{ transform: "rotate(45deg)" }}><path d="M6 7v10M18 7v10" /><path d="M2 10v4M22 10v4" /><path d="M6 12h12" strokeWidth="3" /></svg>; }
 function IconChart({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 20V4" /><path d="M4 20h16" /><path d="M7 16l4-5 3 3 5-7" /></svg>; }
 function IconBulb({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a6 6 0 00-4 10.5c.7.6 1 1.3 1 2.5h6c0-1.2.3-1.9 1-2.5A6 6 0 0012 2z" /></svg>; }
 function IconTarget({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" fill={color} /></svg>; }
 function IconBook({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" /><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /></svg>; }
 
-function PortfolioChart({ rows, color, onScrub }) {
+function PortfolioChart({ rows, color, onScrub, onSwipeStart, onSwipeMove, onSwipeEnd }) {
   const [activeIndex, setActiveIndex] = useState(null);
-  const [primed, setPrimed] = useState(false);
   const svgRef = useRef(null);
   const draggingRef = useRef(false);
-  const holdTimerRef = useRef(null);
-  const downPosRef = useRef(null);
+  const gestureModeRef = useRef(null); // null | "scrub" | "swipe" — decided once per touch
+  const startPosRef = useRef(null);
+  const startTimeRef = useRef(0);
+  const swipeBaseRef = useRef(0);
   const W = 340, H = 170, padL = 4, padR = 4, padT = 10, padB = 4;
   if (rows.length < 2) return <div className="empty">Log more sessions across a few exercises to see this.</div>;
   const vals = rows.map((r) => r.value);
@@ -404,34 +405,55 @@ function PortfolioChart({ rows, color, onScrub }) {
     setActiveIndex(idx);
     if (onScrub) onScrub(rows[idx]);
   };
-  const clearHoldTimer = () => { if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; } };
 
-  // Mouse (trackpad/laptop) has no native-scroll conflict — scrub immediately, same as before.
-  // Touch shares this element with the swipeable carousel, so a quick swipe must be left alone
-  // for the page-change gesture; only a brief hold-still arms scrubbing.
+  // A touch that starts on this chart is fully owned by JS from the first pixel — the browser's
+  // own swipe gesture and our own scrub gesture can't be allowed to race each other, since
+  // whichever wins first locks out the other for the rest of that touch. Decide intent from the
+  // first ~220ms: quick horizontal movement means "swipe the carousel" (driven manually here,
+  // since native scrolling is off for this element); holding still means "scrub."
+  const HOLD_MS = 220, MOVE_THRESHOLD = 8;
   const startScrub = (e) => {
     if (e.pointerType !== "touch") {
       draggingRef.current = true;
-      setPrimed(true);
       scrubTo(e.clientX);
       return;
     }
-    downPosRef.current = { x: e.clientX, y: e.clientY };
-    clearHoldTimer();
-    holdTimerRef.current = setTimeout(() => {
-      draggingRef.current = true;
-      setPrimed(true);
-      scrubTo(e.clientX);
-    }, 220);
+    startPosRef.current = { x: e.clientX, y: e.clientY };
+    startTimeRef.current = Date.now();
+    gestureModeRef.current = null;
   };
   const moveScrub = (e) => {
-    if (draggingRef.current) { scrubTo(e.clientX); return; }
-    if (e.pointerType === "touch" && downPosRef.current) {
-      const dx = Math.abs(e.clientX - downPosRef.current.x), dy = Math.abs(e.clientY - downPosRef.current.y);
-      if (dx > 8 || dy > 8) clearHoldTimer(); // real movement before the hold completes = a swipe, let it pass through
+    if (e.pointerType !== "touch") {
+      if (draggingRef.current) scrubTo(e.clientX);
+      return;
+    }
+    if (!startPosRef.current) return;
+    const dx = e.clientX - startPosRef.current.x, dy = e.clientY - startPosRef.current.y;
+    const elapsed = Date.now() - startTimeRef.current;
+
+    if (gestureModeRef.current === null) {
+      if (Math.abs(dx) > MOVE_THRESHOLD && Math.abs(dx) > Math.abs(dy) && elapsed < HOLD_MS) {
+        gestureModeRef.current = "swipe";
+        swipeBaseRef.current = onSwipeStart ? onSwipeStart() : 0;
+      } else if (elapsed >= HOLD_MS && Math.abs(dx) < MOVE_THRESHOLD && Math.abs(dy) < MOVE_THRESHOLD) {
+        gestureModeRef.current = "scrub";
+        draggingRef.current = true;
+        scrubTo(e.clientX);
+      }
+      return;
+    }
+    if (gestureModeRef.current === "swipe") {
+      if (onSwipeMove) onSwipeMove(swipeBaseRef.current - dx);
+    } else if (gestureModeRef.current === "scrub") {
+      scrubTo(e.clientX);
     }
   };
-  const endScrub = () => { clearHoldTimer(); draggingRef.current = false; downPosRef.current = null; setPrimed(false); };
+  const endScrub = () => {
+    if (gestureModeRef.current === "swipe" && onSwipeEnd) onSwipeEnd();
+    gestureModeRef.current = null;
+    draggingRef.current = false;
+    startPosRef.current = null;
+  };
 
   const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
   const areaPts = `${x(0)},${H} ${pts} ${x(n - 1)},${H}`;
@@ -443,7 +465,7 @@ function PortfolioChart({ rows, color, onScrub }) {
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      style={{ width: "100%", height: 190, touchAction: primed ? "none" : "auto", cursor: "crosshair" }}
+      style={{ width: "100%", height: 190, touchAction: "none", cursor: "crosshair" }}
       onPointerDown={startScrub}
       onPointerMove={moveScrub}
       onPointerUp={endScrub}
@@ -581,7 +603,6 @@ export default function Home() {
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
-  const [view, setView] = useState("portfolio");
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [calendarOpen, setCalendarOpen] = useState(false);
 
@@ -679,7 +700,7 @@ export default function Home() {
       const home = findExerciseHome(ql);
       if (home) setActiveWorkoutId(home);
       setForm((f) => ({ ...f, exercise: ql }));
-      setView("home");
+      scrollToSection("home");
     }
   }, [loaded]);
 
@@ -781,6 +802,7 @@ export default function Home() {
   const toggleWarmup = (id) => persist({ workouts, exercises, entries: entries.map((e) => (e.id === id ? { ...e, isWarmup: !e.isWarmup } : e)) });
 
   const [editingId, setEditingId] = useState(null);
+  const [showTodaysLog, setShowTodaysLog] = useState(false);
   const [editForm, setEditForm] = useState({ weight: "", reps: "", sets: "" });
   const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(entry.weight), reps: String(entry.reps), sets: String(entry.sets) }); };
   const cancelEdit = () => setEditingId(null);
@@ -855,7 +877,7 @@ export default function Home() {
   }, [workouts, exercises, entriesByExerciseStrength]);
 
   const weeklyVolume = useMemo(() => {
-    const numWeeks = 8;
+    const numWeeks = 10;
     const weeks = [];
     for (let i = numWeeks - 1; i >= 0; i--) {
       const end = shiftDate(todayISO(), -i * 7);
@@ -889,6 +911,11 @@ export default function Home() {
   }, [entries]);
 
   const [radarInfoOpen, setRadarInfoOpen] = useState(false);
+  const [insightIndex, setInsightIndex] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setInsightIndex((i) => i + 1), 45000);
+    return () => clearInterval(interval);
+  }, []);
   const [volumeTapInfo, setVolumeTapInfo] = useState(null);
   const [heatmapInfoOpen, setHeatmapInfoOpen] = useState(false);
 
@@ -904,7 +931,7 @@ export default function Home() {
   const resetCarouselAutoplay = () => { carouselLastInteraction.current = Date.now(); };
   useEffect(() => {
     const CAROUSEL_PAGE_COUNT = 4;
-    const AUTOPLAY_MS = 10000;
+    const AUTOPLAY_MS = 20000;
     const interval = setInterval(() => {
       const el = carouselRef.current;
       if (!el) return;
@@ -915,6 +942,41 @@ export default function Home() {
       }
     }, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // A manual swipe that starts on the chart itself is driven entirely in JS (see PortfolioChart) —
+  // these two let it reach into the carousel's own scroll position during that gesture.
+  const chartSwipeStartLeft = useRef(0);
+  const onChartSwipeStart = () => { chartSwipeStartLeft.current = carouselRef.current ? carouselRef.current.scrollLeft : 0; return chartSwipeStartLeft.current; };
+  const onChartSwipeMove = (nextLeft) => { if (carouselRef.current) carouselRef.current.scrollLeft = nextLeft; resetCarouselAutoplay(); };
+  const onChartSwipeEnd = () => {
+    const el = carouselRef.current;
+    if (!el) return;
+    const nextPage = Math.round(el.scrollLeft / el.clientWidth);
+    el.scrollTo({ left: nextPage * el.clientWidth, behavior: "smooth" });
+    resetCarouselAutoplay();
+  };
+
+  // Everything now lives on one continuously scrolling page — the bottom nav and the header
+  // shortcut just scroll to the relevant section instead of switching which one is rendered.
+  const sectionRefs = useRef({});
+  const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  const [activeSection, setActiveSection] = useState("portfolio");
+  useEffect(() => {
+    const onScroll = () => {
+      const keys = Object.keys(sectionRefs.current);
+      let closest = null, closestDist = Infinity;
+      keys.forEach((k) => {
+        const el = sectionRefs.current[k];
+        if (!el) return;
+        const dist = Math.abs(el.getBoundingClientRect().top - 80);
+        if (dist < closestDist) { closestDist = dist; closest = k; }
+      });
+      if (closest) setActiveSection(closest);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const insights = useMemo(() => {
@@ -956,6 +1018,16 @@ export default function Home() {
       }
       const strongest = allSeries.reduce((a, b) => (b.best > a.best ? b : a));
       list.push({ type: "strongest", text: `${strongest.exercise} is your strongest lift — est. ${strongest.best} lb 1RM.` });
+
+      // Near a personal record: current e1RM is close to (but hasn't yet matched) the all-time best.
+      const nearPR = allSeries
+        .map((s) => ({ ...s, latest: s.points[s.points.length - 1] }))
+        .filter((s) => s.best > 0 && s.latest < s.best && (s.best - s.latest) / s.best <= 0.05)
+        .sort((a, b) => (a.best - a.latest) / a.best - (b.best - b.latest) / b.best)[0];
+      if (nearPR) {
+        const pctOff = Math.round(((nearPR.best - nearPR.latest) / nearPR.best) * 100);
+        list.push({ type: "pr", text: `${nearPR.exercise} is within ${pctOff}% of its all-time best — close to a new personal record.` });
+      }
     }
 
     return list;
@@ -1360,34 +1432,15 @@ export default function Home() {
 
   return (
     <div className="wrap">
-      {view === "home" || view === "recommend" ? (
-        <header>
-          <div>
-            <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)}>
-              {activeWorkout?.name}
-              <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
-            </button>
-          </div>
-
-          {showWorkoutMenu && (
-            <div className="dropdown left">
-              {workouts.map((w) => (
-                <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
-              ))}
-              <div className="new-row">
-                <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
-                <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
-              </div>
-            </div>
-          )}
-        </header>
-      ) : null}
+      <button className="import-shortcut-btn" onClick={() => scrollToSection("import")} aria-label="Import & backup">⭳</button>
 
       {saveError && <div className="warn">{saveError}</div>}
 
       {!loaded ? (
         <div className="empty">Loading your log…</div>
-      ) : view === "portfolio" ? (
+      ) : (
+        <>
+        <div ref={(el) => (sectionRefs.current.portfolio = el)}>
         <>
           <div className="chart-carousel" ref={carouselRef} onScroll={onCarouselScroll} onPointerDown={resetCarouselAutoplay} onTouchStart={resetCarouselAutoplay}>
             <div className="chart-carousel-page">
@@ -1408,7 +1461,7 @@ export default function Home() {
               </div>
 
               <div className="chart-box">
-                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} onScrub={setScrubPoint} />
+                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} onScrub={setScrubPoint} onSwipeStart={onChartSwipeStart} onSwipeMove={onChartSwipeMove} onSwipeEnd={onChartSwipeEnd} />
               </div>
               <div className="axis-caption">Drag along the line to see any date — % change in overall estimated strength vs. the start of this range</div>
 
@@ -1431,14 +1484,14 @@ export default function Home() {
             </div>
 
             <div className="chart-carousel-page">
-              <div style={{ background: "#1d5f8a", color: "#fff", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", padding: "10px 0", borderRadius: 4, marginBottom: 10 }}>This Week</div>
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Weekly training volume</div>
               <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
               {volumeTapInfo && (
                 <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
                   {volumeTapInfo.label}: {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}
                 </div>
               )}
-              <div className="axis-caption">Total weight × sets × reps logged each week, last 8 weeks — tap a bar for its exact dates</div>
+              <div className="axis-caption">Total weight × sets × reps logged each week, last 10 weeks (this week in blue) — tap a bar for its exact dates</div>
             </div>
 
             <div className="chart-carousel-page">
@@ -1485,7 +1538,7 @@ export default function Home() {
               >
                 <div className="ticker-track" ref={tickerTrackRef}>
                   {[...tickerSeries, ...tickerSeries].map((s, i) => (
-                    <TickerItem key={i} series={s} onClick={() => { setChartFocusExercise(s.exercise); setView("charts"); }} />
+                    <TickerItem key={i} series={s} onClick={() => { setChartFocusExercise(s.exercise); scrollToSection("charts"); }} />
                   ))}
                 </div>
               </div>
@@ -1515,29 +1568,50 @@ export default function Home() {
             </div>
           )}
 
-          {(insights.length > 0 || fluctuationInsight) && (
-            <div style={{ marginTop: 18 }}>
-              <div className="label-sm" style={{ marginBottom: 10 }}>Insights</div>
-              {[...(fluctuationInsight ? [fluctuationInsight] : []), ...insights].map((ins, i) => {
-                const dotColor = ins.type === "up" || ins.type === "strongest" ? "#22c55e" : ins.type === "down" ? "#ef4444" : "var(--iron)";
-                return (
-                  <div key={i} className="insight-item">
-                    <span className="dot" style={{ background: dotColor }} />
-                    <span>{ins.text}</span>
+          {(insights.length > 0 || fluctuationInsight) && (() => {
+            const allInsights = [...(fluctuationInsight ? [fluctuationInsight] : []), ...insights];
+            const ins = allInsights[insightIndex % allInsights.length];
+            const dotColor = ins.type === "up" || ins.type === "strongest" || ins.type === "pr" ? "#22c55e" : ins.type === "down" ? "#ef4444" : "var(--iron)";
+            return (
+              <div style={{ marginTop: 18 }}>
+                <div className="label-sm" style={{ marginBottom: 10 }}>Insights</div>
+                <div className="insight-item">
+                  <span className="dot" style={{ background: dotColor }} />
+                  <span>{ins.text}</span>
+                </div>
+                {allInsights.length > 1 && (
+                  <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                    {allInsights.map((_, i) => <span key={i} style={{ width: 5, height: 5, borderRadius: 999, background: i === insightIndex % allInsights.length ? "var(--iron)" : "var(--border)" }} />)}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
-          <button className="log-set-row" onClick={() => setView("home")}>
+          <button className="log-set-row" onClick={() => scrollToSection("home")}>
             <span>Log a set</span>
             <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
           </button>
         </>
-      ) : view === "home" || view === "recommend" ? (
+        </div>
+
+        <div ref={(el) => (sectionRefs.current.home = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)} style={{ marginBottom: 14 }}>
+            {activeWorkout?.name}
+            <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
+          </button>
+          {showWorkoutMenu && (
+            <div className="dropdown left">
+              {workouts.map((w) => (
+                <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
+              ))}
+              <div className="new-row">
+                <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
+                <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
+              </div>
+            </div>
+          )}
           <div className="date-row">
             <button onClick={() => setSelectedDate((d) => shiftDate(d, -1))}>‹</button>
             <button className="date-pill" onClick={() => setCalendarOpen((v) => !v)}>{fmtDateFull(selectedDate)}</button>
@@ -1571,21 +1645,13 @@ export default function Home() {
             <button className="btn-iron save-btn" onClick={submitSet}>Save Set</button>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-            {!addingExercise ? (
-              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
-            ) : (
-              <div className="add-ex-row" style={{ marginBottom: 0, flex: 1, marginRight: 12 }}>
-                <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" />
-                <button className="btn-iron" onClick={() => { addExerciseToList(newExerciseName); setNewExerciseName(""); setAddingExercise(false); }}>Add</button>
-              </div>
-            )}
-            <button className="add-ex-link" style={{ marginBottom: 0, flexShrink: 0 }} onClick={clearForm}>Clear All</button>
-          </div>
-
           {todaysEntries.length > 0 && (
-            <div>
-              <div className="label-sm">Logged — {fmtDateFull(selectedDate)}</div>
+            <button className="add-ex-link" style={{ display: "block", marginBottom: 12 }} onClick={() => setShowTodaysLog((v) => !v)}>
+              {showTodaysLog ? "▾" : "▸"} Logged today ({todaysEntries.length})
+            </button>
+          )}
+          {showTodaysLog && todaysEntries.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
               <div className="today-list">
                 {todaysEntries.map((e) => (
                   editingId === e.id ? (
@@ -1611,6 +1677,18 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            {!addingExercise ? (
+              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
+            ) : (
+              <div className="add-ex-row" style={{ marginBottom: 0, flex: 1, marginRight: 12 }}>
+                <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" />
+                <button className="btn-iron" onClick={() => { addExerciseToList(newExerciseName); setNewExerciseName(""); setAddingExercise(false); }}>Add</button>
+              </div>
+            )}
+            <button className="add-ex-link" style={{ marginBottom: 0, flexShrink: 0 }} onClick={clearForm}>Clear All</button>
+          </div>
 
           <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
             <div className="label-sm" style={{ marginBottom: 10 }}>Recommended for today</div>
@@ -1688,9 +1766,11 @@ export default function Home() {
             )}
           </div>
         </>
-      ) : view === "exercises" ? (
+        </div>
+
+        <div ref={(el) => (sectionRefs.current.exercises = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <div className="label-sm" style={{ marginBottom: 14 }}>Exercises</div>
           <div style={{ paddingRight: 26 }}>
           {(() => {
             const sorted = [...activeList].sort((a, b) => a.localeCompare(b));
@@ -1771,9 +1851,11 @@ export default function Home() {
             </div>
           )}
         </>
-      ) : view === "charts" ? (
+        </div>
+
+        <div ref={(el) => (sectionRefs.current.charts = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <div className="label-sm" style={{ marginBottom: 14 }}>Progress</div>
           {chartFocusExercise ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <span style={{ fontWeight: 700, fontSize: 16 }}>{chartFocusExercise}</span>
@@ -1807,9 +1889,11 @@ export default function Home() {
             </div>
           )}
         </>
-      ) : view === "goal" ? (
+        </div>
+
+        <div ref={(el) => (sectionRefs.current.goal = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <div className="label-sm" style={{ marginBottom: 14 }}>Goal Program</div>
           <select className="scope" value={goalExercise || ""} onChange={(e) => { setGoalExercise(e.target.value || null); setGoalMaxTouched(false); }}>
             <option value="">Select an exercise…</option>
             {allExerciseNames.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -1870,9 +1954,11 @@ export default function Home() {
             </>
           )}
         </>
-      ) : view === "import" ? (
+        </div>
+
+        <div ref={(el) => (sectionRefs.current.import = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="back-btn" onClick={() => setView("portfolio")}>← Back</button>
+          <div className="label-sm" style={{ marginBottom: 14 }}>Import &amp; Backup</div>
           <div className="card">
             <div className="label-sm">One-time bulk import</div>
             <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
@@ -1915,28 +2001,25 @@ export default function Home() {
             No auto-email yet — that needs a mail-sending service wired in (Resend is the simplest option, free tier covers this easily). Downloading and attaching it to an email yourself takes 10 seconds; say the word if you want the automatic version built in.
           </div>
         </>
-      ) : null}
-
-
+        </div>
+        </>
+      )}
 
       <div className="bottom-nav">
-        <button className={"bottom-nav-item" + (view === "portfolio" ? " active" : "")} onClick={() => setView("portfolio")}>
-          <IconHome color={view === "portfolio" ? "var(--iron)" : "var(--mute)"} /><span>Overall</span>
+        <button className={"bottom-nav-item" + (activeSection === "exercises" ? " active" : "")} onClick={() => scrollToSection("exercises")}>
+          <IconDumbbell color={activeSection === "exercises" ? "var(--iron)" : "var(--mute)"} /><span>Exercises</span>
         </button>
-        <button className={"bottom-nav-item" + (view === "exercises" ? " active" : "")} onClick={() => setView("exercises")}>
-          <IconDumbbell color={view === "exercises" ? "var(--iron)" : "var(--mute)"} /><span>Exercises</span>
+        <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
+          <IconChart color={activeSection === "charts" ? "var(--iron)" : "var(--mute)"} /><span>Progress</span>
         </button>
-        <button className={"bottom-nav-item" + (view === "charts" ? " active" : "")} onClick={() => setView("charts")}>
-          <IconChart color={view === "charts" ? "var(--iron)" : "var(--mute)"} /><span>Progress</span>
+        <button className={"bottom-nav-item bottom-nav-item-main" + (activeSection === "portfolio" ? " active" : "")} onClick={() => scrollToSection("portfolio")}>
+          <IconHome color={activeSection === "portfolio" ? "var(--iron)" : "var(--mute)"} size={30} /><span>Overall</span>
         </button>
-        <button className={"bottom-nav-item" + (view === "recommend" ? " active" : "")} onClick={() => setView("recommend")}>
-          <IconBulb color={view === "recommend" ? "var(--iron)" : "var(--mute)"} /><span>Recommend</span>
+        <button className={"bottom-nav-item" + (activeSection === "home" ? " active" : "")} onClick={() => scrollToSection("home")}>
+          <IconBulb color={activeSection === "home" ? "var(--iron)" : "var(--mute)"} /><span>Recommend</span>
         </button>
-        <button className={"bottom-nav-item" + (view === "goal" ? " active" : "")} onClick={() => setView("goal")}>
-          <IconTarget color={view === "goal" ? "var(--iron)" : "var(--mute)"} /><span>Goal</span>
-        </button>
-        <button className={"bottom-nav-item" + (view === "import" ? " active" : "")} onClick={() => setView("import")}>
-          <IconBook color={view === "import" ? "var(--iron)" : "var(--mute)"} /><span>Import</span>
+        <button className={"bottom-nav-item" + (activeSection === "goal" ? " active" : "")} onClick={() => scrollToSection("goal")}>
+          <IconTarget color={activeSection === "goal" ? "var(--iron)" : "var(--mute)"} /><span>Goal</span>
         </button>
       </div>
     </div>
