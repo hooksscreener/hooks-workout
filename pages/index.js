@@ -589,39 +589,26 @@ function ConsistencyHeatmap({ weeks, onTap }) {
   );
 }
 
-// The original microdot field (same 16px grid, same 1px dot, same faint --border color), drawn on
-// a canvas so it can occasionally carry a very subtle traveling wave. Viewed straight down from
-// above: a smooth bell-shaped ridge crosses the field on a ~45deg diagonal, and the dots it passes
-// rise a touch (slightly brighter, slightly larger, nudged on the slopes) then settle back.
+// Background: a field of tiny, evenly spaced microdots (the same 16px grid and 1px dots as ever)
+// that is PURE BLACK at rest. Every so often a soft, bell-shaped wave crosses the screen on a
+// ~45deg diagonal; the dots it passes through emerge from the black, rise a touch, then sink back
+// into it. Viewed straight down from above: nothing glows, and nothing is drawn between the dots.
 function DotField() {
   const canvasRef = useRef(null);
-  // Starts fully black: the dots fade in after a short beat (see .dot-field in the stylesheet),
-  // and only then does the occasional wave get going.
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setShown(true), 700);
-    return () => clearTimeout(t);
-  }, []);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return; // no canvas support: fall back to a plain black background
     const GRID = 16, BASE_RADIUS = 1;
-    // Tuned by eye in a real browser. The first version (+26, a literal "10% of full brightness")
-    // was technically running but invisible. This is subtle yet plainly visible if you look; the
-    // dots stay tiny and discrete, and the resting dots are untouched (extremely faint).
-    const PEAK_BOOST = [80, 60, 30]; // crest colour is about (141,106,53): warm amber, never neon
+    // Tuned by eye in a real browser. A dot's colour scales from black (wave far away) up to this
+    // at the crest: a warm amber that stays tiny and discrete, never neon.
+    const CREST = [141, 106, 53];
     const PEAK_RADIUS = 0.45;        // px a dot grows at the crest (1px -> 1.45px)
     const PEAK_SHIFT = 0.7;          // px dots are nudged along the slopes (reads as height)
-    let base = [61, 46, 23];
-    try {
-      const raw = getComputedStyle(document.documentElement).getPropertyValue("--border").trim();
-      const m = /^#?([0-9a-f]{6})$/i.exec(raw);
-      if (m) base = [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
-    } catch (e) { /* keep default */ }
     let w = 0, h = 0, dpr = 1, wave = null, raf = 0, timer = 0;
     const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // Adding ?wave to the address runs a wave every ~9s (first one after the fade-in) so you can check it on demand (it also
+    // Adding ?wave to the address runs a wave every ~9s so you can check it on demand (it also
     // ignores the device's Reduce Motion setting, so you can tell whether that's what's hiding it).
     const preview = /[?&]wave(=|&|$)/.test(window.location.search);
     const canAnimate = preview || !reduced;
@@ -629,37 +616,30 @@ function DotField() {
     const draw = (now) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      let amp = 0, crest = 0;
-      if (wave) {
-        const u = (now - wave.start) / wave.duration;
-        if (u >= 1) wave = null;
-        else {
-          const e = u < 0.12 ? u / 0.12 : u > 0.88 ? (1 - u) / 0.12 : 1;
-          amp = e * e * (3 - 2 * e);
-          const t = u * u * (3 - 2 * u) * 0.35 + u * 0.65;
-          crest = wave.from + (wave.to - wave.from) * t;
-        }
-      }
+      if (!wave) return;                                   // at rest: pure black, nothing drawn
+      const u = Math.max(0, (now - wave.start) / wave.duration);
+      if (u >= 1) { wave = null; return; }                 // wave has passed: back to pure black
+      const e = u < 0.12 ? u / 0.12 : u > 0.88 ? (1 - u) / 0.12 : 1;
+      const amp = e * e * (3 - 2 * e);
+      const t = u * u * (3 - 2 * u) * 0.35 + u * 0.65;
+      const crest = wave.from + (wave.to - wave.from) * t;
       const cols = Math.ceil(w / GRID), rows = Math.ceil(h / GRID);
-      const baseFill = `rgb(${base[0]},${base[1]},${base[2]})`;
       for (let j = 0; j < rows; j++) {
         for (let i = 0; i < cols; i++) {
-          let x = i * GRID + GRID / 2, y = j * GRID + GRID / 2;
-          let ht = 0;
-          if (wave) {
-            const d = (x * wave.dx + y * wave.dy - crest) / wave.sigma;
-            ht = amp * Math.exp(-0.5 * d * d);
-            const slope = -d * ht;
-            x += wave.dx * slope * PEAK_SHIFT * 1.65;
-            y += wave.dy * slope * PEAK_SHIFT * 1.65;
-          }
-          ctx.fillStyle = ht < 0.004 ? baseFill : `rgb(${Math.round(base[0] + PEAK_BOOST[0] * ht)},${Math.round(base[1] + PEAK_BOOST[1] * ht)},${Math.round(base[2] + PEAK_BOOST[2] * ht)})`;
+          const gx = i * GRID + GRID / 2, gy = j * GRID + GRID / 2;
+          const d = (gx * wave.dx + gy * wave.dy - crest) / wave.sigma;
+          const ht = amp * Math.exp(-0.5 * d * d);
+          if (ht < 0.02) continue;                         // still black: nothing to draw
+          const slope = -d * ht;
+          const x = gx + wave.dx * slope * PEAK_SHIFT * 1.65;
+          const y = gy + wave.dy * slope * PEAK_SHIFT * 1.65;
+          ctx.fillStyle = `rgb(${Math.round(CREST[0] * ht)},${Math.round(CREST[1] * ht)},${Math.round(CREST[2] * ht)})`;
           ctx.beginPath();
           ctx.arc(x, y, BASE_RADIUS + PEAK_RADIUS * ht, 0, Math.PI * 2);
           ctx.fill();
         }
       }
-      if (wave) raf = requestAnimationFrame(draw);
+      raf = requestAnimationFrame(draw);
     };
 
     const resize = () => {
@@ -682,7 +662,7 @@ function DotField() {
     };
     const schedule = (first) => {
       // First wave shortly after opening (so you know it works), then every 90-180s, irregularly.
-      const delay = preview ? (first ? 4500 : 9000) : first ? 8000 + Math.random() * 6000 : 90000 + Math.random() * 90000;
+      const delay = preview ? (first ? 2000 : 9000) : first ? 8000 + Math.random() * 6000 : 90000 + Math.random() * 90000;
       timer = setTimeout(() => { if (!document.hidden) startWave(); schedule(false); }, delay);
     };
 
@@ -691,7 +671,7 @@ function DotField() {
     if (canAnimate) schedule(true);
     return () => { window.removeEventListener("resize", resize); clearTimeout(timer); cancelAnimationFrame(raf); };
   }, []);
-  return <canvas ref={canvasRef} className={"dot-field" + (shown ? " on" : "")} aria-hidden="true" />;
+  return <canvas ref={canvasRef} className="dot-field" aria-hidden="true" />;
 }
 
 export default function Home() {
@@ -1094,6 +1074,29 @@ export default function Home() {
     onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Whichever workout has gone longest without a session (rest days you've marked don't count
+  // against it) — shown as a one-tap suggestion right where you'd otherwise open the dropdown.
+  const dueWorkout = useMemo(() => {
+    const todayIso = todayISO();
+    const restSet = new Set(restDays);
+    const daysSinceTrained = (workoutId) => {
+      const wEntries = entries.filter((e) => e.workoutId === workoutId);
+      if (!wEntries.length) return Infinity;
+      const lastDate = wEntries.reduce((max, e) => (e.date > max ? e.date : max), wEntries[0].date);
+      const rawDays = Math.round((new Date(todayIso) - new Date(lastDate)) / 86400000);
+      let restDaysInRange = 0;
+      for (let i = 1; i <= rawDays; i++) if (restSet.has(shiftDate(todayIso, -i))) restDaysInRange++;
+      return rawDays - restDaysInRange;
+    };
+    const candidates = workouts
+      .filter((w) => w.id !== activeWorkoutId)
+      .map((w) => ({ workout: w, days: daysSinceTrained(w.id) }))
+      .filter((c) => c.days >= 3);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.days - a.days);
+    return candidates[0];
+  }, [workouts, entries, restDays, activeWorkoutId]);
 
   const insights = useMemo(() => {
     const list = [];
@@ -1705,10 +1708,17 @@ export default function Home() {
 
         <div ref={(el) => (sectionRefs.current.home = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
-          <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)} style={{ marginBottom: 14 }}>
-            {activeWorkout?.name}
-            <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)} style={{ marginBottom: 0 }}>
+              {activeWorkout?.name}
+              <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
+            </button>
+            {dueWorkout && (
+              <button className="due-pill" onClick={() => { setActiveWorkoutId(dueWorkout.workout.id); setShowWorkoutMenu(false); }}>
+                Try {dueWorkout.workout.name} · {dueWorkout.days === Infinity ? "never done" : `${dueWorkout.days} days`}
+              </button>
+            )}
+          </div>
           {showWorkoutMenu && (
             <div className="dropdown left">
               {workouts.map((w) => (
