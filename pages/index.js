@@ -595,6 +595,13 @@ function ConsistencyHeatmap({ weeks, onTap }) {
 // rise a touch (slightly brighter, slightly larger, nudged on the slopes) then settle back.
 function DotField() {
   const canvasRef = useRef(null);
+  // Starts fully black: the dots fade in after a short beat (see .dot-field in the stylesheet),
+  // and only then does the occasional wave get going.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShown(true), 700);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -614,7 +621,7 @@ function DotField() {
     } catch (e) { /* keep default */ }
     let w = 0, h = 0, dpr = 1, wave = null, raf = 0, timer = 0;
     const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // Adding ?wave to the address runs a wave every ~9s so you can check it on demand (it also
+    // Adding ?wave to the address runs a wave every ~9s (first one after the fade-in) so you can check it on demand (it also
     // ignores the device's Reduce Motion setting, so you can tell whether that's what's hiding it).
     const preview = /[?&]wave(=|&|$)/.test(window.location.search);
     const canAnimate = preview || !reduced;
@@ -675,7 +682,7 @@ function DotField() {
     };
     const schedule = (first) => {
       // First wave shortly after opening (so you know it works), then every 90-180s, irregularly.
-      const delay = preview ? (first ? 2000 : 9000) : first ? 8000 + Math.random() * 6000 : 90000 + Math.random() * 90000;
+      const delay = preview ? (first ? 4500 : 9000) : first ? 8000 + Math.random() * 6000 : 90000 + Math.random() * 90000;
       timer = setTimeout(() => { if (!document.hidden) startWave(); schedule(false); }, delay);
     };
 
@@ -684,7 +691,7 @@ function DotField() {
     if (canAnimate) schedule(true);
     return () => { window.removeEventListener("resize", resize); clearTimeout(timer); cancelAnimationFrame(raf); };
   }, []);
-  return <canvas ref={canvasRef} className="dot-field" aria-hidden="true" />;
+  return <canvas ref={canvasRef} className={"dot-field" + (shown ? " on" : "")} aria-hidden="true" />;
 }
 
 export default function Home() {
