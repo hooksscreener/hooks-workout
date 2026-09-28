@@ -600,8 +600,11 @@ function DotField() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const GRID = 16, BASE_RADIUS = 1;
-    const PEAK_BOOST = [26, 20, 10]; // ~10% of full brightness at the crest, same warm hue
-    const PEAK_RADIUS = 0.3;         // px a dot grows at the crest
+    // Tuned by eye in a real browser. The first version (+26, a literal "10% of full brightness")
+    // was technically running but invisible. This is subtle yet plainly visible if you look; the
+    // dots stay tiny and discrete, and the resting dots are untouched (extremely faint).
+    const PEAK_BOOST = [80, 60, 30]; // crest colour is about (141,106,53): warm amber, never neon
+    const PEAK_RADIUS = 0.45;        // px a dot grows at the crest (1px -> 1.45px)
     const PEAK_SHIFT = 0.7;          // px dots are nudged along the slopes (reads as height)
     let base = [61, 46, 23];
     try {
@@ -611,6 +614,10 @@ function DotField() {
     } catch (e) { /* keep default */ }
     let w = 0, h = 0, dpr = 1, wave = null, raf = 0, timer = 0;
     const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Adding ?wave to the address runs a wave every ~9s so you can check it on demand (it also
+    // ignores the device's Reduce Motion setting, so you can tell whether that's what's hiding it).
+    const preview = /[?&]wave(=|&|$)/.test(window.location.search);
+    const canAnimate = preview || !reduced;
 
     const draw = (now) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -657,23 +664,24 @@ function DotField() {
     };
 
     const startWave = () => {
-      if (wave || reduced) return;
+      if (wave || !canAnimate) return;
       const main = Math.random() < 0.7;
       const theta = ((main ? 45 : 135) + (Math.random() * 24 - 12)) * Math.PI / 180;
       const dx = Math.cos(theta), dy = Math.sin(theta);
       const proj = [[0, 0], [w, 0], [0, h], [w, h]].map(([px, py]) => px * dx + py * dy);
       const sigma = 70 + Math.random() * 50;
-      wave = { start: performance.now(), duration: 2000 + Math.random() * 2000, dx, dy, sigma, from: Math.min(...proj) - 2.6 * sigma, to: Math.max(...proj) + 2.6 * sigma };
+      wave = { start: performance.now(), duration: 2800 + Math.random() * 1300, dx, dy, sigma, from: Math.min(...proj) - 2.6 * sigma, to: Math.max(...proj) + 2.6 * sigma };
       raf = requestAnimationFrame(draw);
     };
     const schedule = (first) => {
-      const delay = first ? 20000 + Math.random() * 20000 : 90000 + Math.random() * 90000;
+      // First wave shortly after opening (so you know it works), then every 90-180s, irregularly.
+      const delay = preview ? (first ? 2000 : 9000) : first ? 8000 + Math.random() * 6000 : 90000 + Math.random() * 90000;
       timer = setTimeout(() => { if (!document.hidden) startWave(); schedule(false); }, delay);
     };
 
     resize();
     window.addEventListener("resize", resize);
-    if (!reduced) schedule(true);
+    if (canAnimate) schedule(true);
     return () => { window.removeEventListener("resize", resize); clearTimeout(timer); cancelAnimationFrame(raf); };
   }, []);
   return <canvas ref={canvasRef} className="dot-field" aria-hidden="true" />;
@@ -935,8 +943,7 @@ export default function Home() {
   // matches the fact that which workout a set belongs to no longer depends on the active tab.
   const todaysEntries = entries.filter((e) => e.date === selectedDate);
 
-  const [tickerScope, setTickerScope] = useState("ALL");
-  const [tickerMenuOpen, setTickerMenuOpen] = useState(false);
+  const tickerScope = "ALL"; // the ticker always shows every exercise
   const tickerSeries = useMemo(() => {
     const scopeExercises = tickerScope === "ALL" ? allExerciseNames : (exercises[tickerScope] || []);
     const list = scopeExercises.map((ex) => {
@@ -1559,17 +1566,6 @@ export default function Home() {
         <div ref={(el) => (sectionRefs.current.portfolio = el)}>
         <>
           <div className="ticker-wrap" style={{ marginTop: 0 }}>
-            <button className="ticker-scope-btn" onClick={() => setTickerMenuOpen((v) => !v)}>
-              {tickerScope === "ALL" ? "All Exercises" : workouts.find((w) => w.id === tickerScope)?.name} ▾
-            </button>
-            {tickerMenuOpen && (
-              <div className="dropdown left" style={{ top: 34 }}>
-                <button className="item" style={{ color: tickerScope === "ALL" ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setTickerScope("ALL"); setTickerMenuOpen(false); }}>All Exercises</button>
-                {workouts.map((w) => (
-                  <button key={w.id} className="item" style={{ color: tickerScope === w.id ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setTickerScope(w.id); setTickerMenuOpen(false); }}>{w.name}</button>
-                ))}
-              </div>
-            )}
             {tickerSeries.length === 0 ? (
               <div className="ticker-empty">Log 3+ sessions of an exercise to see it here.</div>
             ) : (
@@ -1592,29 +1588,6 @@ export default function Home() {
               </div>
             )}
           </div>
-
-          {tickerScope !== "ALL" && (
-            <div style={{ marginTop: 18 }}>
-              <div className="label-sm" style={{ marginBottom: 10 }}>{workouts.find((w) => w.id === tickerScope)?.name} — today's targets</div>
-              {(exercises[tickerScope] || []).map((ex) => {
-                const rec = quickRecommend(entriesByExerciseStrength[ex], progressionMode);
-                return (
-                  <div key={ex} className="day-list-item">
-                    <div className="day-list-name">{ex}</div>
-                    {rec ? (
-                      <div className="day-list-rec">
-                        <div className="rec-weight">{rec.recWeight} <span style={{ fontSize: 12, color: "var(--mute)", fontWeight: 400 }}>lbs</span></div>
-                        <div className="rec-reps">aim for {rec.recReps}+ reps</div>
-                        <div className="rec-last">last: {rec.lastWeight} × {rec.lastReps}</div>
-                      </div>
-                    ) : (
-                      <div className="rec-reps" style={{ color: "var(--mute)" }}>no sets logged yet</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
           <div className="chart-carousel" style={{ marginTop: 6 }} ref={carouselRef} onScroll={onCarouselScroll} onPointerDown={resetCarouselAutoplay} onTouchStart={resetCarouselAutoplay}>
             <div className="chart-carousel-page">
