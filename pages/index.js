@@ -589,6 +589,96 @@ function ConsistencyHeatmap({ weeks, onTap }) {
   );
 }
 
+// The original microdot field (same 16px grid, same 1px dot, same faint --border color), drawn on
+// a canvas so it can occasionally carry a very subtle traveling wave. Viewed straight down from
+// above: a smooth bell-shaped ridge crosses the field on a ~45deg diagonal, and the dots it passes
+// rise a touch (slightly brighter, slightly larger, nudged on the slopes) then settle back.
+function DotField() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const GRID = 16, BASE_RADIUS = 1;
+    const PEAK_BOOST = [26, 20, 10]; // ~10% of full brightness at the crest, same warm hue
+    const PEAK_RADIUS = 0.3;         // px a dot grows at the crest
+    const PEAK_SHIFT = 0.7;          // px dots are nudged along the slopes (reads as height)
+    let base = [61, 46, 23];
+    try {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--border").trim();
+      const m = /^#?([0-9a-f]{6})$/i.exec(raw);
+      if (m) base = [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
+    } catch (e) { /* keep default */ }
+    let w = 0, h = 0, dpr = 1, wave = null, raf = 0, timer = 0;
+    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const draw = (now) => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      let amp = 0, crest = 0;
+      if (wave) {
+        const u = (now - wave.start) / wave.duration;
+        if (u >= 1) wave = null;
+        else {
+          const e = u < 0.12 ? u / 0.12 : u > 0.88 ? (1 - u) / 0.12 : 1;
+          amp = e * e * (3 - 2 * e);
+          const t = u * u * (3 - 2 * u) * 0.35 + u * 0.65;
+          crest = wave.from + (wave.to - wave.from) * t;
+        }
+      }
+      const cols = Math.ceil(w / GRID), rows = Math.ceil(h / GRID);
+      const baseFill = `rgb(${base[0]},${base[1]},${base[2]})`;
+      for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) {
+          let x = i * GRID + GRID / 2, y = j * GRID + GRID / 2;
+          let ht = 0;
+          if (wave) {
+            const d = (x * wave.dx + y * wave.dy - crest) / wave.sigma;
+            ht = amp * Math.exp(-0.5 * d * d);
+            const slope = -d * ht;
+            x += wave.dx * slope * PEAK_SHIFT * 1.65;
+            y += wave.dy * slope * PEAK_SHIFT * 1.65;
+          }
+          ctx.fillStyle = ht < 0.004 ? baseFill : `rgb(${Math.round(base[0] + PEAK_BOOST[0] * ht)},${Math.round(base[1] + PEAK_BOOST[1] * ht)},${Math.round(base[2] + PEAK_BOOST[2] * ht)})`;
+          ctx.beginPath();
+          ctx.arc(x, y, BASE_RADIUS + PEAK_RADIUS * ht, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      if (wave) raf = requestAnimationFrame(draw);
+    };
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 3);
+      w = rect.width; h = rect.height;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      draw(performance.now());
+    };
+
+    const startWave = () => {
+      if (wave || reduced) return;
+      const main = Math.random() < 0.7;
+      const theta = ((main ? 45 : 135) + (Math.random() * 24 - 12)) * Math.PI / 180;
+      const dx = Math.cos(theta), dy = Math.sin(theta);
+      const proj = [[0, 0], [w, 0], [0, h], [w, h]].map(([px, py]) => px * dx + py * dy);
+      const sigma = 70 + Math.random() * 50;
+      wave = { start: performance.now(), duration: 2000 + Math.random() * 2000, dx, dy, sigma, from: Math.min(...proj) - 2.6 * sigma, to: Math.max(...proj) + 2.6 * sigma };
+      raf = requestAnimationFrame(draw);
+    };
+    const schedule = (first) => {
+      const delay = first ? 20000 + Math.random() * 20000 : 90000 + Math.random() * 90000;
+      timer = setTimeout(() => { if (!document.hidden) startWave(); schedule(false); }, delay);
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    if (!reduced) schedule(true);
+    return () => { window.removeEventListener("resize", resize); clearTimeout(timer); cancelAnimationFrame(raf); };
+  }, []);
+  return <canvas ref={canvasRef} className="dot-field" aria-hidden="true" />;
+}
+
 export default function Home() {
   const [passcode, setPasscode] = useState(null);
   const [passInput, setPassInput] = useState("");
@@ -796,6 +886,12 @@ export default function Home() {
     setShowSuggestions(false);
   };
 
+  const bumpForm = (key, delta) => setForm((f) => {
+    const cur = parseFloat(f[key]);
+    const next = Math.max(0, Math.round(((isNaN(cur) ? 0 : cur) + delta) * 100) / 100);
+    return { ...f, [key]: String(next) };
+  });
+
   const clearForm = () => { setForm({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false }); setShowSuggestions(false); };
 
   const deleteEntry = (id) => persist({ workouts, exercises, entries: entries.filter((e) => e.id !== id) });
@@ -959,6 +1055,12 @@ export default function Home() {
 
   // Everything now lives on one continuously scrolling page — the bottom nav and the header
   // shortcut just scroll to the relevant section instead of switching which one is rendered.
+  useEffect(() => {
+    if (!loaded || chartFocusExercise || !entries.length) return;
+    const latest = entries.reduce((a, b) => (b.date > a.date ? b : a), entries[0]);
+    if (latest) setChartFocusExercise(latest.exercise);
+  }, [loaded, entries, chartFocusExercise]);
+
   const sectionRefs = useRef({});
   const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
   const [activeSection, setActiveSection] = useState("portfolio");
@@ -1033,6 +1135,11 @@ export default function Home() {
     return list;
   }, [entries, workouts, allExerciseNames, entriesByExerciseStrength, restDays]);
 
+  // Strength Index: a chain-linked, equal-weighted index of every lift's estimated 1RM, starting
+  // at 100. Each day's move is the average of that day's actual changes across all lifts you've
+  // started tracking (a lift that didn't print that day counts as 0). Because it chains daily
+  // changes instead of averaging levels, adding a brand-new lift never causes a jump, and a
+  // lift you skip simply holds its last value until it prints again.
   const portfolioSeries = useMemo(() => {
     const perExercise = {};
     strengthEntries.forEach((e) => {
@@ -1043,33 +1150,37 @@ export default function Home() {
     const exNames = Object.keys(perExercise).filter((ex) => Object.keys(perExercise[ex]).length >= 2);
     if (exNames.length === 0) return { rows: [] };
 
-    const baseline = {};
+    const price = {}, firstDate = {};
     exNames.forEach((ex) => {
       const dates = Object.keys(perExercise[ex]).sort();
-      const firstEntry = perExercise[ex][dates[0]];
-      baseline[ex] = estE1RM(firstEntry.weight, firstEntry.reps);
+      price[ex] = {};
+      dates.forEach((d) => { price[ex][d] = estE1RM(perExercise[ex][d].weight, perExercise[ex][d].reps); });
+      firstDate[ex] = dates[0];
     });
 
     const sparseDatesSet = new Set();
     exNames.forEach((ex) => Object.keys(perExercise[ex]).forEach((d) => sparseDatesSet.add(d)));
     const sparseDates = Array.from(sparseDatesSet).sort();
 
-    // One row per calendar day, not just days you logged something — a rest day (or a lift you
-    // haven't touched in a while) carries its value forward flat, same as a stock that didn't
-    // trade still holds its last price. The line only moves on an actual new result.
+    // One row per calendar day so rest days show as a flat continuation.
     const allDates = [];
     for (let d = sparseDates[0]; d <= todayISO(); d = shiftDate(d, 1)) allDates.push(d);
 
-    const lastKnown = {};
-    const rows = allDates.map((date) => {
-      let sum = 0, count = 0;
+    const lastPrice = {};
+    let index = 100;
+    const rows = allDates.map((date, di) => {
+      let retSum = 0, active = 0;
       exNames.forEach((ex) => {
-        const entry = perExercise[ex][date];
-        if (entry) lastKnown[ex] = estE1RM(entry.weight, entry.reps);
-        if (lastKnown[ex] !== undefined) { sum += (lastKnown[ex] / baseline[ex]) * 100; count++; }
+        if (firstDate[ex] <= date) active++;
+        const p = price[ex][date];
+        if (p !== undefined && p > 0) {
+          if (lastPrice[ex] > 0) retSum += p / lastPrice[ex] - 1;
+          lastPrice[ex] = p;
+        }
       });
-      return { date, label: fmtDate(date), value: count ? Math.round((sum / count) * 10) / 10 : null };
-    }).filter((r) => r.value !== null);
+      if (di > 0 && active > 0) index = index * (1 + retSum / active);
+      return { date, label: fmtDate(date), value: Math.round(index * 10) / 10 };
+    });
 
     return { rows, exerciseCount: exNames.length };
   }, [strengthEntries]);
@@ -1085,12 +1196,12 @@ export default function Home() {
     const last = rows[rows.length - 1];
     const prev = rows[rows.length - 2];
     const delta = Math.round((last.value - prev.value) * 10) / 10;
-    if (Math.abs(delta) < 5) return null;
+    if (Math.abs(delta) < 1.5) return null;
     const todaysExercises = strengthEntries.filter((e) => e.date === last.date).map((e) => e.exercise);
     const thin = todaysExercises.find((ex) => (entriesByExerciseStrength[ex] || []).length <= 4);
     const direction = delta > 0 ? "jumped" : "dropped";
-    let text = `Overall ${direction} ${Math.abs(delta)} pts on ${last.label} — a bigger single-session swing than usual.`;
-    if (thin) text += ` ${thin} has a short logged history, which can swing the blended average more than a lift you train constantly.`;
+    let text = `Overall ${direction} ${Math.abs(delta)} pts on ${last.label} — a bigger single-day move than usual for this index.`;
+    if (thin) text += ` ${thin} has a short logged history, so a single result from it carries more weight than one from a lift you train constantly.`;
     return { type: delta > 0 ? "up" : "down", text };
   }, [portfolioSeries, strengthEntries, entriesByExerciseStrength]);
 
@@ -1109,7 +1220,7 @@ export default function Home() {
   const portfolioDisplayRows = useMemo(() => {
     if (portfolioFiltered.length < 2) return [];
     const first = portfolioFiltered[0].value;
-    return portfolioFiltered.map((r) => ({ date: r.date, label: r.label, value: Math.round(((r.value - first) / first) * 1000) / 10 }));
+    return portfolioFiltered.map((r) => ({ date: r.date, label: r.label, index: r.value, value: Math.round(((r.value - first) / first) * 1000) / 10 }));
   }, [portfolioFiltered]);
 
   // Auto-scroll drives a transform on the inner track rather than native scrollLeft — animating
@@ -1431,8 +1542,10 @@ export default function Home() {
   }
 
   return (
+    <>
+    <DotField />
     <div className="wrap">
-      <button className="import-shortcut-btn" onClick={() => scrollToSection("import")} aria-label="Import & backup">⭳</button>
+      <button className="import-shortcut-btn" onClick={() => scrollToSection("import")} aria-label="Import & backup"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4" /><path d="M7 9l5-5 5 5" /><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" /></svg></button>
 
       {saveError && <div className="warn">{saveError}</div>}
 
@@ -1442,75 +1555,7 @@ export default function Home() {
         <>
         <div ref={(el) => (sectionRefs.current.portfolio = el)}>
         <>
-          <div className="chart-carousel" ref={carouselRef} onScroll={onCarouselScroll} onPointerDown={resetCarouselAutoplay} onTouchStart={resetCarouselAutoplay}>
-            <div className="chart-carousel-page">
-              <div className="portfolio-change">
-                {scrubPoint ? (
-                  <>
-                    <span style={{ color: scrubPoint.value >= 0 ? "#22c55e" : "#ef4444" }}>
-                      {scrubPoint.value > 0 ? "+" : ""}{scrubPoint.value}%
-                    </span>
-                    <span className="cap">{scrubPoint.label}</span>
-                  </>
-                ) : portfolioChange ? (
-                  <span style={{ color: portfolioChange.up ? "#22c55e" : "#ef4444" }}>
-                    {portfolioChange.up ? "▲" : "▼"} {Math.abs(portfolioChange.pct)}%
-                  </span>
-                ) : <span className="cap">Not enough data yet</span>}
-                {!scrubPoint && <span className="cap">{portfolioSeries.exerciseCount ? `across ${portfolioSeries.exerciseCount} exercises` : ""}</span>}
-              </div>
-
-              <div className="chart-box">
-                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} onScrub={setScrubPoint} onSwipeStart={onChartSwipeStart} onSwipeMove={onChartSwipeMove} onSwipeEnd={onChartSwipeEnd} />
-              </div>
-              <div className="axis-caption">Drag along the line to see any date — % change in overall estimated strength vs. the start of this range</div>
-
-              <div className="pills">
-                {RANGE_PRESETS.map((r) => (
-                  <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}>{r.label}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="chart-carousel-page">
-              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Strength growth by category</div>
-              <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
-              {radarInfoOpen && allTimeRange && (
-                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
-                  {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
-                </div>
-              )}
-              <div className="axis-caption">Average % change in estimated 1RM across each workout's exercises, all-time — tap the chart for the exact span, hollow points mean not enough data yet</div>
-            </div>
-
-            <div className="chart-carousel-page">
-              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Weekly training volume</div>
-              <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
-              {volumeTapInfo && (
-                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
-                  {volumeTapInfo.label}: {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}
-                </div>
-              )}
-              <div className="axis-caption">Total weight × sets × reps logged each week, last 10 weeks (this week in blue) — tap a bar for its exact dates</div>
-            </div>
-
-            <div className="chart-carousel-page">
-              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Training consistency</div>
-              <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
-              {heatmapInfoOpen && heatmapWeeks.length > 0 && (
-                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
-                  {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(heatmapWeeks[heatmapWeeks.length - 1][6].date)}
-                </div>
-              )}
-              <div className="axis-caption">Darker = more sets logged that day, last 10 weeks — tap the grid for the exact span</div>
-            </div>
-          </div>
-
-          <div className="carousel-dots">
-            {[0, 1, 2, 3].map((i) => <div key={i} className={"carousel-dot" + (carouselPage === i ? " active" : "")} />)}
-          </div>
-
-          <div className="ticker-wrap" style={{ marginTop: 22 }}>
+          <div className="ticker-wrap" style={{ marginTop: 0 }}>
             <button className="ticker-scope-btn" onClick={() => setTickerMenuOpen((v) => !v)}>
               {tickerScope === "ALL" ? "All Exercises" : workouts.find((w) => w.id === tickerScope)?.name} ▾
             </button>
@@ -1567,6 +1612,86 @@ export default function Home() {
               })}
             </div>
           )}
+
+          <div className="chart-carousel" style={{ marginTop: 6 }} ref={carouselRef} onScroll={onCarouselScroll} onPointerDown={resetCarouselAutoplay} onTouchStart={resetCarouselAutoplay}>
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 10 }}>Your Strength Over Time</div>
+              <div className="portfolio-change">
+                {(() => {
+                  const allRows = portfolioSeries.rows;
+                  const curIndex = scrubPoint ? scrubPoint.index : (allRows.length ? allRows[allRows.length - 1].value : null);
+                  const pct = scrubPoint ? scrubPoint.value : portfolioChange?.pct;
+                  if (curIndex === null || curIndex === undefined) return <span className="cap">Not enough data yet</span>;
+                  const up = (pct ?? 0) >= 0;
+                  const rangeLabel = RANGE_PRESETS.find((r) => r.key === portfolioRange)?.label;
+                  return (
+                    <>
+                      <span className="index-num">{Number(curIndex).toFixed(1)}</span>
+                      <span className="index-meta">
+                        <span style={{ color: up ? "#22c55e" : "#ef4444" }}>{up ? "▲" : "▼"} {Math.abs(pct ?? 0)}%</span>
+                        <span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span>
+                      </span>
+                      <span className="index-tag">Strength Index · {portfolioSeries.exerciseCount} lifts</span>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="chart-box">
+                <PortfolioChart rows={portfolioDisplayRows} color={portfolioChange?.up === false ? "#ef4444" : "#22c55e"} onScrub={setScrubPoint} onSwipeStart={onChartSwipeStart} onSwipeMove={onChartSwipeMove} onSwipeEnd={onChartSwipeEnd} />
+              </div>
+              <div className="axis-caption">Hold and drag along the line to see any date. Index starts at 100 on your first logged day; the % is the change since the start of this range.</div>
+
+              <div className="pills">
+                {RANGE_PRESETS.map((r) => (
+                  <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}>{r.label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Strength growth by category</div>
+              <div className="chart-slot">
+              <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
+              {radarInfoOpen && allTimeRange && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
+                </div>
+              )}
+              </div>
+              <div className="axis-caption">Average % change in estimated 1RM across each workout's exercises, all-time — tap the chart for the exact span, hollow points mean not enough data yet</div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Weekly training volume</div>
+              <div className="chart-slot">
+              <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
+              {volumeTapInfo && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {volumeTapInfo.label}: {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}
+                </div>
+              )}
+              </div>
+              <div className="axis-caption">Total weight × sets × reps logged each week, last 10 weeks (this week in blue) — tap a bar for its exact dates</div>
+            </div>
+
+            <div className="chart-carousel-page">
+              <div className="label-sm" style={{ textAlign: "center", marginBottom: 6 }}>Training consistency</div>
+              <div className="chart-slot">
+              <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
+              {heatmapInfoOpen && heatmapWeeks.length > 0 && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+                  {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(heatmapWeeks[heatmapWeeks.length - 1][6].date)}
+                </div>
+              )}
+              </div>
+              <div className="axis-caption">Darker = more sets logged that day, last 10 weeks — tap the grid for the exact span</div>
+            </div>
+          </div>
+
+          <div className="carousel-dots">
+            {[0, 1, 2, 3].map((i) => <div key={i} className={"carousel-dot" + (carouselPage === i ? " active" : "")} />)}
+          </div>
 
           {(insights.length > 0 || fluctuationInsight) && (() => {
             const allInsights = [...(fluctuationInsight ? [fluctuationInsight] : []), ...insights];
@@ -1634,9 +1759,15 @@ export default function Home() {
               )}
             </div>
             <div className="row3">
-              <input type="number" inputMode="decimal" placeholder="lbs" value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
-              <input type="number" inputMode="numeric" placeholder="sets" value={form.sets} onChange={(e) => setForm({ ...form, sets: e.target.value })} />
-              <input type="number" inputMode="numeric" placeholder="reps" value={form.reps} onChange={(e) => setForm({ ...form, reps: e.target.value })} />
+              {[["weight", "lbs", "decimal", 5], ["sets", "sets", "numeric", 1], ["reps", "reps", "numeric", 1]].map(([key, ph, mode, step]) => (
+                <div key={key} className="stepper-field">
+                  <input type="number" inputMode={mode} placeholder={ph} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+                  <div className="stepper-btns">
+                    <button type="button" aria-label={`Increase ${ph}`} onClick={() => bumpForm(key, step)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg></button>
+                    <button type="button" aria-label={`Decrease ${ph}`} onClick={() => bumpForm(key, -step)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg></button>
+                  </div>
+                </div>
+              ))}
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13, color: "var(--mute)", cursor: "pointer" }}>
               <input type="checkbox" checked={form.isWarmup} onChange={(e) => setForm({ ...form, isWarmup: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--iron)" }} />
@@ -1771,7 +1902,8 @@ export default function Home() {
         <div ref={(el) => (sectionRefs.current.exercises = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
           <div className="label-sm" style={{ marginBottom: 14 }}>Exercises</div>
-          <div style={{ paddingRight: 26 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
           {(() => {
             const sorted = [...activeList].sort((a, b) => a.localeCompare(b));
             const seenLetters = new Set();
@@ -1839,34 +1971,41 @@ export default function Home() {
           })()}
           </div>
           {activeList.length > 6 && (
-            <div
-              ref={azStripRef}
-              className="az-strip"
-              onPointerDown={azStart}
-              onPointerMove={azMove}
-              onPointerUp={azEnd}
-              onPointerLeave={azEnd}
-            >
-              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => <span key={l}>{l}</span>)}
+            <div className="az-col">
+              <div
+                ref={azStripRef}
+                className="az-strip"
+                onPointerDown={azStart}
+                onPointerMove={azMove}
+                onPointerUp={azEnd}
+                onPointerLeave={azEnd}
+              >
+                {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => <span key={l}>{l}</span>)}
+              </div>
             </div>
           )}
+          </div>
         </>
         </div>
 
         <div ref={(el) => (sectionRefs.current.charts = el)} style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
         <>
           <div className="label-sm" style={{ marginBottom: 14 }}>Progress</div>
-          {chartFocusExercise ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <span style={{ fontWeight: 700, fontSize: 16 }}>{chartFocusExercise}</span>
-              <button onClick={() => setChartFocusExercise(null)} style={{ background: "none", border: "none", color: "var(--mute)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ View by workout</button>
-            </div>
-          ) : (
-            <select className="scope" value={chartScope} onChange={(e) => { setChartScope(e.target.value); setChartFocusExercise(null); }}>
-              <option value="ALL">All Workouts</option>
-              {workouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-          )}
+          {(() => {
+            const withData = allExerciseNames.filter((ex) => (entriesByExercise[ex] || []).length > 0).sort((a, b) => a.localeCompare(b));
+            const groups = {};
+            withData.forEach((ex) => { const L = (ex[0] || "#").toUpperCase(); (groups[L] = groups[L] || []).push(ex); });
+            return (
+              <select className="scope" value={chartFocusExercise || ""} onChange={(e) => setChartFocusExercise(e.target.value || null)}>
+                {!chartFocusExercise && <option value="">Select an exercise…</option>}
+                {Object.keys(groups).sort().map((L) => (
+                  <optgroup key={L} label={L}>
+                    {groups[L].map((ex) => <option key={ex} value={ex}>{ex}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            );
+          })()}
           <div className="pills">
             {RANGE_PRESETS.map((r) => <button key={r.key} className={"pill" + (r.key === chartRange ? " active" : "")} onClick={() => setChartRange(r.key)}>{r.label}</button>)}
           </div>
@@ -2016,12 +2155,13 @@ export default function Home() {
           <IconHome color={activeSection === "portfolio" ? "var(--iron)" : "var(--mute)"} size={30} /><span>Overall</span>
         </button>
         <button className={"bottom-nav-item" + (activeSection === "home" ? " active" : "")} onClick={() => scrollToSection("home")}>
-          <IconBulb color={activeSection === "home" ? "var(--iron)" : "var(--mute)"} /><span>Recommend</span>
+          <IconBulb color={activeSection === "home" ? "var(--iron)" : "var(--mute)"} /><span>Workout</span>
         </button>
         <button className={"bottom-nav-item" + (activeSection === "goal" ? " active" : "")} onClick={() => scrollToSection("goal")}>
           <IconTarget color={activeSection === "goal" ? "var(--iron)" : "var(--mute)"} /><span>Goal</span>
         </button>
       </div>
     </div>
+    </>
   );
 }
