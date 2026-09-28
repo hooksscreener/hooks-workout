@@ -1137,7 +1137,10 @@ export default function Home() {
 
   // Strength Index: a chain-linked, equal-weighted index of every lift's estimated 1RM, starting
   // at 100. Each day's move is the average of that day's actual changes across all lifts you've
-  // started tracking (a lift that didn't print that day counts as 0). Because it chains daily
+  // started tracking (a lift that didn't print that day counts as 0). Changes are measured as
+  // log-changes: estimated 1RM bounces around with rep count, and averaging plain percent moves
+  // would turn that noise into fake growth. Log-changes cancel exactly, so the index equals the
+  // true geometric average of every lift's growth. Because it chains daily
   // changes instead of averaging levels, adding a brand-new lift never causes a jump, and a
   // lift you skip simply holds its last value until it prints again.
   const portfolioSeries = useMemo(() => {
@@ -1174,11 +1177,11 @@ export default function Home() {
         if (firstDate[ex] <= date) active++;
         const p = price[ex][date];
         if (p !== undefined && p > 0) {
-          if (lastPrice[ex] > 0) retSum += p / lastPrice[ex] - 1;
+          if (lastPrice[ex] > 0) retSum += Math.log(p / lastPrice[ex]);
           lastPrice[ex] = p;
         }
       });
-      if (di > 0 && active > 0) index = index * (1 + retSum / active);
+      if (di > 0 && active > 0) index = index * Math.exp(retSum / active);
       return { date, label: fmtDate(date), value: Math.round(index * 10) / 10 };
     });
 
