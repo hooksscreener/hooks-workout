@@ -79,8 +79,8 @@ function CalendarPopup({ selectedDate, onSelect, onClose }) {
   );
 }
 
-const INK = "var(--ink)";
-const CARD_INK = "var(--card)";
+const INK = "var(--bg)";
+const CARD_INK = "var(--surface)";
 // Epley, but reps above 10 count as 10: the formula is only dependable up to about 10 reps, and past
 // that it keeps adding ~3% per rep, which reads like a max nobody could actually lift.
 const E1RM_REP_CAP = 10;
@@ -209,7 +209,7 @@ function SvgChart({ rows, series, mode, metric }) {
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + t * (H - padT - padB);
         const val = Math.round(max - t * (max - min));
-        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" /><text x={2} y={yy + 3} fontSize="9" fill="var(--mute)">{val}</text></g>;
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" /><text x={2} y={yy + 3} fontSize="9" fill="var(--text-secondary)">{val}</text></g>;
       })}
       {series.map((s, si) => {
         const pts = [];
@@ -217,23 +217,23 @@ function SvgChart({ rows, series, mode, metric }) {
         return <polyline key={s} points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />;
       })}
       {n <= 24 && series.map((s, si) => rows.map((r, i) => r[s] !== undefined && <circle key={`${s}-${i}`} cx={x(i)} cy={y(r[s])} r="2.4" fill={LINE_COLORS[si % LINE_COLORS.length]} />))}
-      {ticks.map((tk, i) => <text key={i} x={padL + tk.pos * (W - padL - padR)} y={H - 6} fontSize="9" fill="var(--mute)" textAnchor={tk.anchor}>{fmtDate(tk.date)}</text>)}
+      {ticks.map((tk, i) => <text key={i} x={padL + tk.pos * (W - padL - padR)} y={H - 6} fontSize="9" fill="var(--text-secondary)" textAnchor={tk.anchor}>{fmtDate(tk.date)}</text>)}
 
       {activeRow && (
         <g>
-          <line x1={x(activeIdx)} y1={padT} x2={x(activeIdx)} y2={H - padB} stroke="var(--mute)" strokeWidth="1" strokeDasharray="3,3" opacity="0.6" />
+          <line x1={x(activeIdx)} y1={padT} x2={x(activeIdx)} y2={H - padB} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="3,3" opacity="0.6" />
           {activeLines.map((l) => (
             <circle key={l.series} cx={x(activeIdx)} cy={y(activeRow[l.series])} r={5} fill={l.color} stroke={INK} strokeWidth="1.5" />
           ))}
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="var(--border)" />
-          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--mute)">{activeRow.label}</text>
+          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--text-secondary)">{activeRow.label}</text>
           {(() => {
             let lineIdx = 0;
             return activeLines.map((l) => {
               const rowsOut = [];
               rowsOut.push(<text key={`${l.series}-h`} x={boxX + 8} y={boxY + 14 + (++lineIdx) * lineH} fontSize="10" fontWeight="700" fill={l.color}>{l.text}</text>);
               if (l.detail) l.detail.forEach((d, di) => {
-                rowsOut.push(<text key={`${l.series}-d${di}`} x={boxX + 14} y={boxY + 14 + (++lineIdx) * lineH} fontSize="9" fontWeight="500" fill="var(--chalk)">{d.exercise}: {d.weight} lbs × {d.reps}{d.sets > 1 ? ` × ${d.sets}` : ""}</text>);
+                rowsOut.push(<text key={`${l.series}-d${di}`} x={boxX + 14} y={boxY + 14 + (++lineIdx) * lineH} fontSize="9" fontWeight="500" fill="var(--text-primary)">{d.exercise}: {d.weight} lbs × {d.reps}{d.sets > 1 ? ` × ${d.sets}` : ""}</text>);
               });
               return rowsOut;
             });
@@ -630,7 +630,7 @@ function HoneyPicker({ value, onPick }) {
         const color = HONEY_COLORS[i];
         const on = (value || "").toLowerCase() === color;
         return (
-          <polygon key={color} points={hexPts(cx, cy, SIZE * 0.97)} fill={color} stroke={on ? "var(--chalk)" : "var(--ink)"} strokeWidth={on ? 3 : 1.5} strokeLinejoin="round"
+          <polygon key={color} points={hexPts(cx, cy, SIZE * 0.97)} fill={color} stroke={on ? "var(--text-primary)" : "var(--bg)"} strokeWidth={on ? 3 : 1.5} strokeLinejoin="round"
             role="radio" aria-checked={on} aria-label={color} style={{ cursor: "pointer" }} onClick={() => onPick(color)} />
         );
       })}
@@ -723,7 +723,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       <g clipPath="url(#portfolioAreaClip)" mask="url(#portfolioFadeMask)">
         <rect x="0" y="0" width={W} height={H} fill="url(#portfolioDots)" />
       </g>
-      <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="var(--mute)" strokeWidth="1" strokeDasharray="2,4" opacity="0.7" />
+      <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,4" opacity="0.7" />
       {maRuns.map((run, i) => (
         <polyline key={i} points={run.join(" ")} fill="none" stroke="var(--ma)" strokeWidth="1.5" strokeDasharray="1,3" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
       ))}
@@ -731,7 +731,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       {active && (
         <g>
           <line x1={active.x} y1={padT} x2={active.x} y2={H} stroke={color} strokeWidth="1" opacity="0.35" strokeDasharray="3,3" />
-          <circle cx={active.x} cy={active.y} r={6} fill={color} stroke="var(--ink)" strokeWidth="2" />
+          <circle cx={active.x} cy={active.y} r={6} fill={color} stroke="var(--bg)" strokeWidth="2" />
           <circle cx={active.x} cy={active.y} r={10} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5" />
         </g>
       )}
@@ -766,17 +766,17 @@ function RadarChart({ data, rangeLabel, onTap }) {
         return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--border)" strokeWidth="1" />;
       })}
       {zeroR > 0 && zeroR < outerR && (
-        <polygon points={data.map((_, i) => pt(i, zeroR).join(",")).join(" ")} fill="none" stroke="var(--mute)" strokeWidth="1" strokeDasharray="3,3" />
+        <polygon points={data.map((_, i) => pt(i, zeroR).join(",")).join(" ")} fill="none" stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="3,3" />
       )}
-      <polygon points={dataPath} fill="var(--iron)" fillOpacity="0.2" stroke="var(--iron)" strokeWidth="2" strokeLinejoin="round" />
+      <polygon points={dataPath} fill="var(--text-primary)" fillOpacity="0.2" stroke="var(--text-primary)" strokeWidth="2" strokeLinejoin="round" />
       {dataPts.map(([x, y], i) => (
         data[i].hasData
-          ? <circle key={i} cx={x} cy={y} r="3.5" fill="var(--iron)" />
-          : <circle key={i} cx={x} cy={y} r="4" fill="var(--ink)" stroke="var(--mute)" strokeWidth="1.5" strokeDasharray="2,2" />
+          ? <circle key={i} cx={x} cy={y} r="3.5" fill="var(--text-primary)" />
+          : <circle key={i} cx={x} cy={y} r="4" fill="var(--bg)" stroke="var(--text-secondary)" strokeWidth="1.5" strokeDasharray="2,2" />
       ))}
       {data.map((d, i) => {
         const [lx, ly] = pt(i, outerR + 22);
-        return <text key={i} x={lx} y={ly} fontSize="10" fontWeight="700" fill="var(--chalk)" textAnchor="middle" dominantBaseline="central">{d.label}</text>;
+        return <text key={i} x={lx} y={ly} fontSize="10" fontWeight="700" fill="var(--text-primary)" textAnchor="middle" dominantBaseline="central">{d.label}</text>;
       })}
     </svg>
   );
@@ -791,15 +791,15 @@ function VolumeBarChart({ weeks, onTapBar }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
       {[0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + (1 - t) * (H - padT - padB);
-        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--mute)">{Math.round((max * t) / 1000)}k</text></g>;
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--text-secondary)">{Math.round((max * t) / 1000)}k</text></g>;
       })}
       {weeks.map((w, i) => {
         const h = (w.volume / max) * (H - padT - padB);
         const x = padL + i * ((W - padL - padR) / n) + 3;
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
-          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill={w.isCurrent ? "#1d5f8a" : "var(--iron)"} />
-          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--mute)" textAnchor="middle">{w.label}</text>
+          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill={w.isCurrent ? "#1d5f8a" : "var(--text-primary)"} />
+          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-secondary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
     </svg>
@@ -811,7 +811,7 @@ function ConsistencyHeatmap({ weeks, onTap }) {
   const cell = 20, gap = 4;
   const W = weeks.length * (cell + gap);
   const H = 7 * (cell + gap);
-  const colorFor = (count) => (count === 0 ? "var(--border)" : count === 1 ? "#7a3a10" : count === 2 ? "#b5540f" : "var(--iron)");
+  const colorFor = (count) => (count === 0 ? "var(--border)" : count === 1 ? "#7a3a10" : count === 2 ? "#b5540f" : "var(--text-primary)");
   return (
     <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
       {weeks.map((week, wi) => week.map((day, di) => (
@@ -1793,7 +1793,7 @@ export default function Home() {
       <div className="login-wrap">
         <div className="login-card">
           <div className="eyebrow"><span className="dot">●</span> Hooks Workout</div>
-          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 24, fontWeight: 700, textTransform: "uppercase", marginTop: 6 }}>Enter Passcode</div>
+          <div style={{ fontSize: "var(--fs-title)", fontWeight: 600, marginTop: 8 }}>Enter Passcode</div>
           {authError && <div className="warn" style={{ marginTop: 12 }}>{authError}</div>}
           <input type="password" placeholder="Passcode" value={passInput} onChange={(e) => setPassInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitPasscode()} />
           <button className="btn-iron" onClick={submitPasscode}>Unlock</button>
@@ -1810,28 +1810,28 @@ export default function Home() {
 
   const renderEditableRow = (e, compact) => (
     editingId === e.id ? (
-      <div key={e.id} className={compact ? "hist-item" : "today-item"} style={{ flexWrap: "wrap", gap: 6 }}>
-        <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
+      <div key={e.id} className={compact ? "hist-item" : "today-item"} style={{ flexWrap: "wrap", gap: 4 }}>
+        <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 52, padding: "4px 6px", fontSize: 13 }} />
-          <span className="muted" style={{ fontSize: 11 }}>lbs ×</span>
-          <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 40, padding: "4px 6px", fontSize: 13 }} />
-          <span className="muted" style={{ fontSize: 11 }}>×</span>
-          <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 6px", fontSize: 13 }} />
-          <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "#22c55e", fontWeight: 700 }}>✓</button>
+          <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 52, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
+          <span className="muted" style={{ fontSize: "var(--fs-label)" }}>lbs ×</span>
+          <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
+          <span className="muted" style={{ fontSize: "var(--fs-label)" }}>×</span>
+          <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
+          <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "var(--gain)", fontWeight: 600 }}>✓</button>
           <button className="del-btn" onClick={cancelEdit}>✕</button>
         </span>
       </div>
     ) : (
       <div key={e.id} className={compact ? "hist-item" : "today-item"} style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
         {compact
-          ? <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{fmtDate(e.date)}</span>
-          : <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: 10, fontWeight: 400 }}> (warm-up)</span>}</span>}
+          ? <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
+          : <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> (warm-up)</span>}</span>}
         <span className="num">
           {e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
-          {compact && e.isWarmup && <span className="muted" style={{ fontSize: 10 }}>(warm-up)</span>}
+          {compact && e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)" }}>(warm-up)</span>}
           <button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button>
-          <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: 10, fontWeight: 700, color: e.isWarmup ? "var(--iron)" : "var(--mute)" }}>W</button>
+          <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: "var(--fs-label)", fontWeight: 600, color: e.isWarmup ? "var(--text-primary)" : "var(--text-secondary)" }}>W</button>
           <button className="del-btn" onClick={() => deleteEntry(e.id)} aria-label="Delete set"><span className="x-circle">✕</span></button>
         </span>
       </div>
@@ -1842,7 +1842,7 @@ export default function Home() {
     <>
     <DotField />
     <div className="wrap">
-      <button className="import-shortcut-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear /></button>
+      <div className="top-bar"><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
 
@@ -1851,7 +1851,7 @@ export default function Home() {
       ) : (
         <>
         {/* ---------------- OVERALL ---------------- */}
-        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" style={{ minHeight: `calc(100dvh - ${navH + 56}px)` }}>
+        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen">
           <div className="label-sm" style={{ textAlign: "center", marginBottom: 8 }}>Your Strength Over Time</div>
           <div className="portfolio-change">
             {!portfolioView ? <span className="cap">Not enough data yet</span> : (() => {
@@ -1860,7 +1860,7 @@ export default function Home() {
               const rangeLabel = RANGE_PRESETS.find((r) => r.key === portfolioRange)?.label;
               return (
                 <>
-                  <span className="index-num" style={{ color: up ? "#22c55e" : "#ef4444" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>
+                  <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
                   <span className="index-tag">Strength Index · {portfolioSeries.exerciseCount} lifts</span>
                 </>
@@ -1870,7 +1870,7 @@ export default function Home() {
 
           <div className="chart-box">
             {portfolioView
-              ? <PortfolioChart rows={portfolioView.display} maRows={maKey === "off" ? null : portfolioView.maDisplay} color={portfolioView.up ? "#22c55e" : "#ef4444"} onScrub={setScrubPoint} />
+              ? <PortfolioChart rows={portfolioView.display} maRows={maKey === "off" ? null : portfolioView.maDisplay} color={portfolioView.up ? "var(--gain)" : "var(--loss)"} onScrub={setScrubPoint} />
               : <div className="empty">Log sessions on a few exercises to see this.</div>}
           </div>
           {portfolioView && maKey !== "off" && (
@@ -1898,7 +1898,7 @@ export default function Home() {
               <span className="label-sm" style={{ marginBottom: 0 }}>Lifter's Digest{aiDigest ? <span className="ai-tag">AI</span> : null}</span>
               <span className="insight-count">{digestOpen ? "tap to collapse" : "tap for full"}</span>
             </div>
-            {[["last", "Last workout", "var(--chalk)"], ["up", "Improving", "#22c55e"], ["down", "Slipping or flat", "#ef4444"], ["due", "Due soon", "var(--iron)"]].map(([k, label, col]) => (
+            {[["last", "Last workout", "var(--text-secondary)"], ["up", "Improving", "var(--gain)"], ["down", "Slipping or flat", "var(--loss)"], ["due", "Due soon", "var(--text-secondary)"]].map(([k, label, col]) => (
               <div key={k} className="dg-sec">
                 <div className="dg-label" style={{ color: col }}>{label}</div>
                 <div className={"dg-text" + (digestOpen ? " open" : "")}>{digest[k]}</div>
@@ -1916,14 +1916,14 @@ export default function Home() {
 
           <button className="log-set-row" onClick={() => scrollToSection("home")}>
             <span>Log a set</span>
-            <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-title)" }}>›</span>
           </button>
         </div>
 
         {/* ---------------- WORKOUT (search, today's target, log) ---------------- */}
         <div ref={(el) => (sectionRefs.current.home = el)} className="workout-section">
           {dueWorkout && (
-            <div style={{ marginBottom: 14 }}>
+            <div className="due-wrap">
               <button className="due-pill" onClick={() => startDay(dueWorkout.workout.id)}>
                 Try {dueWorkout.workout.name} · {dueWorkout.days === Infinity ? "never done" : `${dueWorkout.days} days`} · tap to start
               </button>
@@ -1967,12 +1967,12 @@ export default function Home() {
               <div className="nav-row">
                 {swapTarget && (
                   <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
-                    <span style={{ fontSize: 15 }}>⇄</span> Switch to {swapTarget}
+                    <span style={{ fontSize: "var(--fs-sec)" }}>⇄</span> Switch to {swapTarget}
                   </button>
                 )}
                 {nextTarget && nextTarget !== swapTarget && (
                   <button className="swap-btn next-btn" onClick={() => selectExercise(nextTarget)} aria-label={`Next exercise ${nextTarget}`}>
-                    Next: {nextTarget} <span style={{ fontSize: 15 }}>›</span>
+                    Next: {nextTarget} <span style={{ fontSize: "var(--fs-sec)" }}>›</span>
                   </button>
                 )}
               </div>
@@ -1990,7 +1990,7 @@ export default function Home() {
             ) : recommendation?.noData ? (
               <div className="rec-card">
                 <div className="label-sm">What's your strongest set?</div>
-                <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 12 }}>
+                <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
                   No sets logged for {recExercise} yet. Enter the most weight you've lifted for it and how many reps, and that's enough to build a first recommendation.
                 </div>
                 <div className="row3" style={{ marginBottom: 0 }}>
@@ -2002,15 +2002,15 @@ export default function Home() {
               <div className="rec-card">
                 <div className="rec-top">
                   <div>
-                    <div className="label-sm" style={{ marginBottom: 2 }}>Recommended today</div>
+                    <div className="label-sm" style={{ marginBottom: 0 }}>Recommended today</div>
                     <div className="rec-main">{recommendation.nextTopWeight}<span className="muted"> lbs × </span>{repsText(recommendation.repLow, recommendation.repHigh)}</div>
                   </div>
                   <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{recommendation.lastTop.weight} × {recommendation.lastTop.reps}</div>
                 </div>
                 <div className="rec-note">{recommendation.note}</div>
-                <div className="today-list" style={{ marginTop: 10 }}>
+                <div className="today-list" style={{ marginTop: 8 }}>
                   {recommendation.rows.map((r) => (
-                    <div key={r.set} className="today-item" style={{ padding: "7px 12px" }}>
+                    <div key={r.set} className="today-item" style={{ padding: "8px 12px" }}>
                       <span style={{ fontWeight: 600 }}>Set {r.set}{r.set === 1 ? " (top)" : ""}</span>
                       <span className="num">{r.weight}<span className="muted">lbs</span><span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
                     </div>
@@ -2021,15 +2021,15 @@ export default function Home() {
 
             {dupPrompt && (
               <div className="dup-prompt">
-                <div style={{ fontSize: 13, lineHeight: 1.4, marginBottom: 10 }}>
+                <div style={{ fontSize: "var(--fs-label)", lineHeight: 1.4, marginBottom: 8 }}>
                   You already have <b>{dupPrompt.existing}</b>. Is "{dupPrompt.typed}" the same lift?
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn-iron" style={{ flex: 1, padding: "10px 6px", fontSize: 12 }} onClick={() => {
+                  <button className="btn-iron" style={{ flex: 1, padding: "8px 4px", fontSize: "var(--fs-label)" }} onClick={() => {
                     if (dupPrompt.kind === "log") { setRecExercise(dupPrompt.existing); submitSet(dupPrompt.existing, true); }
                     else { selectExercise(dupPrompt.existing); resetAddForm(); }
                   }}>Use {dupPrompt.existing}</button>
-                  <button className="pill" style={{ flex: 1, padding: "10px 6px", fontSize: 12 }} onClick={() => {
+                  <button className="pill" style={{ flex: 1, padding: "8px 4px", fontSize: "var(--fs-label)" }} onClick={() => {
                     if (dupPrompt.kind === "log") submitSet(dupPrompt.typed, true);
                     else { addExerciseToList(dupPrompt.typed, dupPrompt.days || [activeWorkoutId], true); resetAddForm(); setDupPrompt(null); }
                   }}>Keep as new</button>
@@ -2037,7 +2037,7 @@ export default function Home() {
               </div>
             )}
 
-            <div className="row3" style={{ marginTop: 14 }}>
+            <div className="row3" style={{ marginTop: 12 }}>
               {[["weight", "lbs", "decimal", 5], ["sets", "sets", "numeric", 1], ["reps", "reps", "numeric", 1]].map(([key, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
                   <input type="number" inputMode={mode} placeholder={ph} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
@@ -2048,8 +2048,8 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--mute)", cursor: "pointer" }}>
-              <input type="checkbox" checked={form.isWarmup} onChange={(e) => setForm({ ...form, isWarmup: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--iron)" }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--fs-label)", color: "var(--text-secondary)", cursor: "pointer" }}>
+              <input type="checkbox" checked={form.isWarmup} onChange={(e) => setForm({ ...form, isWarmup: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--accent)" }} />
               Warm-up set (won't count toward recommendations or your top set)
             </label>
           </div>
@@ -2076,10 +2076,10 @@ export default function Home() {
           {addingExercise && (
             <div className="card add-card">
               <div className="label-sm">New exercise</div>
-              <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 10 }} />
+              <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 8 }} />
               <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 12 }} />
               <datalist id="machine-brands">{MACHINE_BRANDS.map((b) => <option key={b} value={b} />)}</datalist>
-              <div className="label-sm" style={{ marginBottom: 6 }}>Which day(s)? Tick any that apply</div>
+              <div className="label-sm" style={{ marginBottom: 4 }}>Which day(s)? Tick any that apply</div>
               <div className="day-checks">
                 {workouts.map((w) => (
                   <label key={w.id} className={"day-check" + (newExerciseDays.includes(w.id) ? " on" : "")}>
@@ -2098,7 +2098,7 @@ export default function Home() {
 
         {/* ---------------- PROGRESS ---------------- */}
         <div ref={(el) => (sectionRefs.current.charts = el)} className="section-block">
-          <div className="label-sm" style={{ marginBottom: 14 }}>Progress</div>
+          <div className="label-sm" style={{ marginBottom: 12 }}>Progress</div>
           {(() => {
             const withData = allExerciseNames.filter((ex) => (entriesByExercise[ex] || []).length > 0);
             const lastDate = (ex) => (entriesByExercise[ex][0] || {}).date || "";
@@ -2144,21 +2144,21 @@ export default function Home() {
 
           {chartFocusExercise && (
             <div className="card">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <div className="label-sm" style={{ marginBottom: 0 }}>History · {focusHistory.length} logged</div>
-                <div style={{ display: "flex", gap: 14 }}>
-                  <button className="add-ex-link" style={{ marginBottom: 0, fontSize: 12 }} onClick={() => setMergeOpen((v) => !v)}>Merge into…</button>
-                  <button className="add-ex-link" style={{ marginBottom: 0, fontSize: 12 }} onClick={() => deleteExercise(chartFocusExercise)}>Delete</button>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-label)" }} onClick={() => setMergeOpen((v) => !v)}>Merge into…</button>
+                  <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-label)" }} onClick={() => deleteExercise(chartFocusExercise)}>Delete</button>
                 </div>
               </div>
               {mergeUndo && (
                 <div className="merge-note">
-                  Merged {mergeUndo.from} into {mergeUndo.to}. <button className="add-ex-link" style={{ marginBottom: 0, fontSize: 12, color: "var(--iron)" }} onClick={undoMerge}>Undo</button>
+                  Merged {mergeUndo.from} into {mergeUndo.to}. <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-label)", color: "var(--text-primary)" }} onClick={undoMerge}>Undo</button>
                 </div>
               )}
               {mergeOpen && (
                 <div className="merge-panel">
-                  <div style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.4, marginBottom: 8 }}>
+                  <div style={{ fontSize: "var(--fs-label)", color: "var(--text-secondary)", lineHeight: 1.4, marginBottom: 8 }}>
                     Moves every set logged under {chartFocusExercise} into the exercise you pick, then removes {chartFocusExercise}. Only merge true duplicates; different machines are different lifts.
                   </div>
                   <select className="scope" style={{ marginBottom: 8 }} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
@@ -2172,19 +2172,19 @@ export default function Home() {
               )}
               <div className="hist-list">{shownHistory.map((e) => renderEditableRow(e, true))}</div>
               {focusHistory.length > 10 && (
-                <button className="add-ex-link" style={{ marginTop: 10, marginBottom: 0, fontSize: 12 }} onClick={() => setHistoryAll((v) => !v)}>
+                <button className="add-ex-link" style={{ marginTop: 8, marginBottom: 0, fontSize: "var(--fs-label)" }} onClick={() => setHistoryAll((v) => !v)}>
                   {historyAll ? "Show less" : `Show all ${focusHistory.length}`}
                 </button>
               )}
             </div>
           )}
 
-          <div className="label-sm" style={{ margin: "26px 0 12px" }}>Training overview</div>
+          <div className="label-sm" style={{ margin: "24px 0 12px" }}>Training overview</div>
           <div className="card">
             <div className="label-sm" style={{ textAlign: "center" }}>Strength growth by category</div>
             <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
             {radarInfoOpen && allTimeRange && (
-              <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
               </div>
             )}
@@ -2194,7 +2194,7 @@ export default function Home() {
             <div className="label-sm" style={{ textAlign: "center" }}>Weekly training volume</div>
             <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
             {volumeTapInfo && (
-              <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 Week of {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}{volumeTapInfo.isCurrent ? " (so far)" : ""}
               </div>
             )}
@@ -2204,7 +2204,7 @@ export default function Home() {
             <div className="label-sm" style={{ textAlign: "center" }}>Training consistency</div>
             <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
             {heatmapInfoOpen && heatmapWeeks.length > 0 && (
-              <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--iron)", marginBottom: 4 }}>
+              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
               </div>
             )}
@@ -2214,10 +2214,10 @@ export default function Home() {
 
         <div ref={(el) => (sectionRefs.current.import = el)} className="section-block">
         <>
-          <div className="label-sm" style={{ marginBottom: 14 }}>Import &amp; Backup</div>
+          <div className="label-sm" style={{ marginBottom: 12 }}>Import &amp; Backup</div>
           <div className="card">
             <div className="label-sm">One-time bulk import</div>
-            <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
               Loads {IMPORT_DATA.length} sets across {new Set(IMPORT_DATA.map((d) => d.exercise)).size} exercises from your written log, dated Aug 2025 – Aug 2026. New exercise names get added to the right workout automatically.
             </div>
             <button className="btn-iron save-btn" onClick={runImport} disabled={alreadyImported} style={{ opacity: alreadyImported ? 0.5 : 1, cursor: alreadyImported ? "default" : "pointer" }}>
@@ -2227,12 +2227,12 @@ export default function Home() {
           <div className="card">
             <div className="label-sm">Couldn't import automatically</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {IMPORT_SKIPPED.map((s, i) => <div key={i} style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.5 }}>• {s}</div>)}
+              {IMPORT_SKIPPED.map((s, i) => <div key={i} style={{ fontSize: "var(--fs-label)", color: "var(--text-secondary)", lineHeight: 1.5 }}>• {s}</div>)}
             </div>
           </div>
           <div className="card">
             <div className="label-sm">Incline Bench history</div>
-            <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
               Loads {INCLINE_IMPORT_DATA.length} sets, Sep 2025 – Aug 2026. Reps weren't recorded for most of these — assumed 6 reps × 3 sets throughout, except 1/19 which was noted as 2 reps. Dumbbell sets file separately under "Incline Bench (DB)".
             </div>
             <button className="btn-iron save-btn" onClick={runInclineImport} disabled={alreadyImportedIncline} style={{ opacity: alreadyImportedIncline ? 0.5 : 1, cursor: alreadyImportedIncline ? "default" : "pointer" }}>
@@ -2241,14 +2241,14 @@ export default function Home() {
           </div>
           <div className="card">
             <div className="label-sm">Full backup</div>
-            <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
               Downloads everything — workouts, exercises, every logged set — as a JSON file. Keep this somewhere safe (email it to yourself, save it to Drive/iCloud). If your database ever got wiped, this is what you'd restore from.
             </div>
             <button className="btn-iron save-btn" onClick={exportJSON}>Download JSON Backup</button>
           </div>
           <div className="card">
             <div className="label-sm">For spreadsheets / your own charts</div>
-            <div style={{ fontSize: 13, color: "var(--chalk)", lineHeight: 1.5, marginBottom: 14 }}>
+            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
               One row per logged set — date, workout, exercise, weight, sets, reps, and estimated 1RM. Opens straight into Excel, Google Sheets, or Numbers — pivot it, chart it, slice it however you want outside the app.
             </div>
             <button className="btn-iron save-btn" onClick={exportCSV}>Download CSV</button>
@@ -2266,8 +2266,8 @@ export default function Home() {
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
           <div className="sheet" role="dialog" aria-label="Settings">
             <div className="sheet-head">
-              <span style={{ fontSize: 20, fontWeight: 800, textTransform: "uppercase" }}>Settings</span>
-              <button className="add-ex-link" style={{ marginBottom: 0, fontSize: 22 }} onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
+              <span className="sheet-title">Settings</span>
+              <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-title)" }} onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
             </div>
 
             <div className="label-sm">Appearance</div>
@@ -2277,39 +2277,39 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="label-sm" style={{ marginTop: 6 }}>Accent colour</div>
+            <div className="label-sm" style={{ marginTop: 4 }}>Accent colour</div>
             <HoneyPicker value={settings.accent} onPick={(c) => { updateSettings({ accent: c }); setHexDraft(""); }} />
             <div className="hex-row">
               <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex colour" />
-              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 14px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
-              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 14px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
+              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
+              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
             </div>
 
-            <div className="label-sm" style={{ marginTop: 18 }}>Lifter's Digest</div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Lifter's Digest</div>
             <label className="toggle-row"><span>AI digest (more detail and the likely why)</span><input type="checkbox" checked={settings.ai} onChange={(e) => updateSettings({ ai: e.target.checked })} /></label>
-            <select className="scope" value={settings.goal} onChange={(e) => updateSettings({ goal: e.target.value })} aria-label="Training goal" style={{ marginBottom: 0, marginTop: 6 }}>
+            <select className="scope" value={settings.goal} onChange={(e) => updateSettings({ goal: e.target.value })} aria-label="Training goal" style={{ marginBottom: 0, marginTop: 4 }}>
               {GOALS.map((g) => <option key={g.key} value={g.key}>Goal: {g.label}</option>)}
             </select>
 
-            <div className="label-sm" style={{ marginTop: 18 }}>Sounds &amp; vibration</div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Sounds &amp; vibration</div>
             <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
             <label className="toggle-row"><span>Vibration (Android; not available on iPhone web apps)</span><input type="checkbox" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>
 
-            <div className="label-sm" style={{ marginTop: 18 }}>Tell us what you think</div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Tell us what you think</div>
             <textarea className="feedback-box" rows={3} value={feedbackText} onChange={(e) => { setFeedbackText(e.target.value); setFeedbackStatus(""); }} placeholder="What's confusing, missing or great?" />
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-              <button className="btn-iron" style={{ padding: "10px 18px", fontSize: 13 }} onClick={sendFeedback} disabled={!feedbackText.trim()}>Send feedback</button>
-              <span className="muted" style={{ fontSize: 12 }}>{feedbackStatus}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <button className="btn-iron" style={{ padding: "8px 16px", fontSize: "var(--fs-label)" }} onClick={sendFeedback} disabled={!feedbackText.trim()}>Send feedback</button>
+              <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{feedbackStatus}</span>
             </div>
             {me && me.role === "owner" && (
               <div style={{ marginTop: 12 }}>
                 <button className="add-ex-link" style={{ marginBottom: 8 }} onClick={loadFeedback}>View feedback from testers</button>
-                {feedbackList && (feedbackList.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>Nothing yet.</div> : (
+                {feedbackList && (feedbackList.length === 0 ? <div className="muted" style={{ fontSize: "var(--fs-label)" }}>Nothing yet.</div> : (
                   <div className="today-list">
                     {feedbackList.map((f, i) => (
                       <div key={i} className="hist-item" style={{ display: "block" }}>
-                        <div className="muted" style={{ fontSize: 11 }}>{f.name} · {new Date(f.at).toLocaleString()}</div>
-                        <div style={{ fontSize: 13, marginTop: 2 }}>{f.message}</div>
+                        <div className="muted" style={{ fontSize: "var(--fs-label)" }}>{f.name} · {new Date(f.at).toLocaleString()}</div>
+                        <div style={{ fontSize: "var(--fs-label)", marginTop: 0 }}>{f.message}</div>
                       </div>
                     ))}
                   </div>
@@ -2317,10 +2317,10 @@ export default function Home() {
               </div>
             )}
 
-            <div className="label-sm" style={{ marginTop: 18 }}>Data</div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Data</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="pill" style={{ flex: "1 1 auto", padding: "10px 14px" }} onClick={() => { setSettingsOpen(false); setTimeout(() => scrollToSection("import"), 50); }}>Import &amp; backup</button>
-              <button className="pill" style={{ flex: "1 1 auto", padding: "10px 14px" }} onClick={signOut}>Sign out{me ? ` (${me.name})` : ""}</button>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={() => { setSettingsOpen(false); setTimeout(() => scrollToSection("import"), 50); }}>Import &amp; backup</button>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={signOut}>Sign out{me ? ` (${me.name})` : ""}</button>
             </div>
           </div>
         </>
@@ -2331,7 +2331,7 @@ export default function Home() {
           <div className="sheet-backdrop" onClick={() => closeWelcome(false)} />
           <div className="sheet" role="dialog" aria-label="Welcome">
             <div className="sheet-head">
-              <span style={{ fontSize: 20, fontWeight: 800, textTransform: "uppercase" }}>Welcome</span>
+              <span className="sheet-title">Welcome</span>
             </div>
             <div className="welcome-step"><b>1.</b> Search an exercise, enter weight and reps, and log a set. A rest timer starts on its own.</div>
             <div className="welcome-step"><b>2.</b> Overall tracks your Strength Index like a portfolio. After a couple of weeks it fills in.</div>
@@ -2343,7 +2343,7 @@ export default function Home() {
       )}
 
       {(restTimer || dockVisible) && loaded && (
-        <div className="dock" ref={dockRef} style={{ bottom: `calc(${navH}px + var(--nav-gap) + env(safe-area-inset-bottom) * 0.6 + 8px)` }}>
+        <div className="dock" ref={dockRef}>
           {restTimer && (
             <div className={"rest-bar" + (restRemaining <= 0 ? " done" : "")}>
               <div className="rest-fill" style={{ width: `${Math.min(100, Math.max(0, (1 - restRemaining / restTimer.total) * 100))}%` }} />
@@ -2363,16 +2363,16 @@ export default function Home() {
         </div>
       )}
 
-      <div className="bottom-nav" ref={navRef} style={{ "--i": activeSection === "charts" ? 0 : activeSection === "home" ? 2 : 1 }}>
-        <span className="nav-lens" aria-hidden="true" />
+      <div className="bottom-nav" ref={navRef}>
+
         <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
-          <IconChart color={activeSection === "charts" ? "var(--iron)" : "var(--mute)"} /><span>Progress</span>
+          <IconChart color="currentColor" /><span>Progress</span>
         </button>
         <button className={"bottom-nav-item bottom-nav-item-main" + (activeSection === "portfolio" ? " active" : "")} onClick={() => scrollToSection("portfolio")}>
-          <IconHome color={activeSection === "portfolio" ? "var(--iron)" : "var(--mute)"} size={24} /><span>Overall</span>
+          <IconHome color="currentColor" size={24} /><span>Overall</span>
         </button>
         <button className={"bottom-nav-item" + (activeSection === "home" ? " active" : "")} onClick={() => scrollToSection("home")}>
-          <IconBulb color={activeSection === "home" ? "var(--iron)" : "var(--mute)"} /><span>Workout</span>
+          <IconBulb color="currentColor" /><span>Workout</span>
         </button>
       </div>
     </div>
