@@ -325,10 +325,10 @@ svg text{font-family:var(--font-num);}
 .log-set-row span:first-child{font-size:.9375rem;}
 .dg-label{font-size:.6875rem;}
 .dg-text{font-size:.8125rem;}
-.pills.range-tabs{gap:0;border-bottom:1px solid var(--border);}
+.pills.range-tabs{gap:0;}
 .pills.range-tabs .pill,.pills.range-tabs .pill.active{background:none;border:none;border-radius:0;font-size:.75rem;color:var(--text-secondary);position:relative;padding:0 var(--s-1);}
 .pills.range-tabs .pill.active{color:var(--text-primary);}
-.pills.range-tabs .pill.active::after{content:"";position:absolute;left:18%;right:18%;bottom:-1px;height:2px;border-radius:2px;background:var(--accent);}
+.pills.range-tabs .pill.active::after,.pills-sub .pill-sm.active::after{content:"";position:absolute;left:18%;right:18%;bottom:13px;height:2px;border-radius:2px;background:var(--accent);}
 .stats-block{margin-top:var(--s-5);}
 .st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s-4) var(--s-3);}
 .st-cell{min-width:0;}
@@ -337,3 +337,15 @@ svg text{font-family:var(--font-num);}
 .st-head{font-size:var(--fs-sec);font-weight:var(--fw-title);margin:var(--s-5) 0 var(--s-3);}
 .st-mini{margin:var(--s-3) 0 var(--s-1);padding:var(--s-3);background:var(--surface-2);border-radius:var(--r-input);gap:var(--s-2);}
 .st-mini .st-val{font-size:var(--fs-sec);}
+
+.pills-sub{gap:0;}
+.pills-sub .pill-sm,.pills-sub .pill-sm.active{background:none;border:none;border-radius:0;font-size:.75rem;color:var(--text-secondary);position:relative;padding:0 var(--s-3);}
+.pills-sub .pill-sm.active{color:var(--text-primary);}
+.pills.range-tabs .pill::after{bottom:13px;}
+.carousel-row{margin:0;padding:0 0 var(--s-1) 1px;}
+.carousel-card{flex:0 0 148px;}
+.gl-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-2);margin-bottom:var(--s-2);}
+.gl-opt{display:flex;align-items:center;gap:var(--s-2);min-height:44px;padding:0 var(--s-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-input);color:var(--text-primary);font-size:var(--fs-sec);cursor:pointer;text-align:left;}
+.gl-opt.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+.gl-dots{display:inline-flex;gap:3px;}
+.gl-dots i{width:12px;height:12px;border-radius:50%;display:inline-block;}

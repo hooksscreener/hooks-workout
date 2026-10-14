@@ -180,11 +180,18 @@ function exSummary(name, series, list, ytd) {
 const estE5RM = (weight, reps) => Math.round(estE1RM(weight, reps) / (1 + 5 / 30));
 const fmtNum = (n) => Math.round(n).toLocaleString("en-US");
 const defaultTicker = (name) => {
-  const words = String(name).replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/).filter(Boolean);
+  // Consonants only, up to 5, spread across the words (Bench Press -> BNCPR).
+  const words = String(name).toUpperCase().replace(/[^A-Z0-9 ]/g, " ").trim().split(/\s+/).filter(Boolean);
   if (!words.length) return "";
-  const first = words[0];
-  if (first.length >= 5 || words.length === 1) return first.slice(0, 5).toUpperCase();
-  return (first + words.slice(1).join("")).slice(0, 5).toUpperCase();
+  const cons = words.map((w) => w.replace(/[AEIOU]/g, "") || w);
+  const n = cons.length, quota = n === 1 ? 5 : n === 2 ? 3 : n === 3 ? 2 : 1;
+  let out = cons.map((c, i) => c.slice(0, i === 0 ? quota : n === 2 ? 2 : Math.min(quota, 2)));
+  let res = out.join("");
+  if (res.length < 5) { // top up from what was left over, in order
+    const rest = cons.map((c, i) => c.slice(out[i].length)).join("");
+    res += rest.slice(0, 5 - res.length);
+  }
+  return res.slice(0, 5);
 };
 // Stats for one exercise. Working sets only. rangeFrom/rangeTo bound the "this range" numbers.
 function exStats(list, fromISO, toISOd) {
@@ -601,7 +608,7 @@ const HONEY_COLORS = [
   "#ffb000", "#f5d90a", "#7ed957", "#1ecbe1", "#5b8cff", "#b26bff",
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false };
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false, gl: "ios" };
 const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
 const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
@@ -1113,7 +1120,6 @@ export default function Home() {
   const [restDays, setRestDays] = useState([]);
   const [progressionMode, setProgressionMode] = useState("weight"); // "weight" | "reps"
   const [tickers, setTickers] = useState({});
-  const tickerOf = (name) => (tickers && tickers[name]) || defaultTicker(name);
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
@@ -1222,7 +1228,7 @@ export default function Home() {
   useEffect(() => {
     const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
     const apply = () => {
-      const t = deriveTheme(settings.mode, settings.accent, mq ? mq.matches : false);
+      const t = deriveTheme(settings.mode, settings.accent, mq ? mq.matches : false, settings.gl);
       const root = document.documentElement;
       root.setAttribute("data-theme", t.scheme);
       Object.keys(t.vars).forEach((k) => root.style.setProperty(k, t.vars[k]));
@@ -1302,6 +1308,19 @@ export default function Home() {
     entries.forEach((e) => set.add(e.exercise));
     return Array.from(set).sort();
   }, [exercises, entries]);
+
+  // Auto tickers, made unique: a repeat gets a number on the end (BNCPR, BNCP2).
+  const autoTickers = useMemo(() => {
+    const used = new Set(Object.values(tickers || {})), map = {};
+    allExerciseNames.forEach((nm) => {
+      if (tickers && tickers[nm]) return;
+      let t = defaultTicker(nm), k = 2;
+      while (used.has(t)) { t = defaultTicker(nm).slice(0, 4) + k; k += 1; }
+      used.add(t); map[nm] = t;
+    });
+    return map;
+  }, [allExerciseNames, tickers]);
+  const tickerOf = (name) => (tickers && tickers[name]) || autoTickers[name] || defaultTicker(name);
 
   // Matches any part of a name, in any word order. With nothing typed yet it offers the lifts you
   // used most recently, which is what you want when you're alternating between two exercises.
@@ -2744,6 +2763,15 @@ export default function Home() {
             <div className="pills">
               {[[false, "Solid"], [true, "Glass"]].map(([k, label]) => (
                 <button key={label} className={"pill" + (!!settings.glass === k ? " active" : "")} onClick={() => updateSettings({ glass: k })}>{label}</button>
+              ))}
+            </div>
+
+            <div className="label-sm" style={{ marginTop: 16 }}>Gains and losses</div>
+            <div className="gl-grid">
+              {[["ios", "iOS", "#34C759", "#FF453A"], ["mint", "Mint", "#00D68F", "#FF5C5C"], ["emerald", "Emerald", "#2ECC71", "#FF3B5C"], ["teal", "Teal", "#1DD1A1", "#FF6B81"], ["lime", "Lime", "#7ED957", "#FF4D4D"], ["bluorange", "Blue / orange", "#4DA3FF", "#FFA03A"]].map(([k, label, g, l]) => (
+                <button key={k} type="button" className={"gl-opt" + ((settings.gl || "ios") === k ? " on" : "")} onClick={() => updateSettings({ gl: k })} aria-pressed={(settings.gl || "ios") === k}>
+                  <span className="gl-dots"><i style={{ background: g }} /><i style={{ background: l }} /></span>{label}
+                </button>
               ))}
             </div>
 

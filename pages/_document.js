@@ -21,7 +21,7 @@ export default function Document() {
         <title>Hooks Workout</title>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches);var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontText,s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}}catch(e){}})();`,
+            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches,s.gl);var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontText,s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}}catch(e){}})();`,
           }}
         />
       </Head>
