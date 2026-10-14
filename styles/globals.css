@@ -1,6 +1,6 @@
 /* ===== Design tokens =====================================================================
    Colors below are the dark defaults. lib/theme.js (inlined in _document.js, re-applied from
-   Settings) overrides the colour tokens for light mode and sets --accent / --on-accent. */
+   Settings) overrides the color tokens for light mode and sets --accent / --on-accent. */
 :root{
   --bg:#0A0806; --surface:#14100C; --surface-2:#1C1712; --border:#2E2519;
   --text-primary:#F5F1EA; --text-secondary:#A89F91; --text-tertiary:#8A8275;
@@ -122,9 +122,9 @@ select.scope{width:100%;padding:var(--s-3) var(--s-4);font-size:var(--fs-body);f
 .stepper-field{position:relative;}
 .stepper-field input{padding:var(--s-3) 28px var(--s-3) var(--s-2);-moz-appearance:textfield;}
 .stepper-field input::-webkit-outer-spin-button,.stepper-field input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
-.stepper-btns{position:absolute;right:var(--s-1);top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:var(--s-1);}
-.stepper-btns button{width:24px;height:20px;padding:0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-input);color:var(--text-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;}
-.stepper-btns svg{width:12px;height:12px;}
+
+
+
 
 /* "Try X" pill: ordinary in-flow element at the top of the Workout section */
 .due-wrap{margin:0 0 var(--s-4);}
@@ -205,3 +205,51 @@ select.scope{width:100%;padding:var(--s-3) var(--s-4);font-size:var(--fs-body);f
 .feedback-box{width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text-primary);border-radius:var(--r-input);padding:var(--s-3);font-size:var(--fs-body);font-family:var(--font);resize:vertical;}
 .welcome-step{font-size:var(--fs-sec);line-height:1.5;margin-bottom:var(--s-3);}
 .clear-x{position:absolute;right:var(--s-3);top:50%;transform:translateY(-50%);width:24px;height:24px;border-radius:50%;border:1.5px solid var(--text-secondary);background:none;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+
+/* ===== Round 2 ===== */
+/* Chart: fixed share of the screen (about 30%), drawn to fill its box so it can't spill over the pills below */
+.overall-screen .chart-box{flex:none;height:30dvh;min-height:200px;position:relative;contain:none;display:block;padding:0;}
+.pf-chart{position:absolute;inset:0;width:100%;height:100%;flex:none;min-height:0;}
+
+/* Tap targets */
+.pill,.pill-sm{min-height:44px;display:inline-flex;align-items:center;justify-content:center;}
+.pill-sm{padding:0 var(--s-3);}
+.pill-sm.active{background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border);}
+.date-row button{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;}
+.date-row .date-pill{min-width:0;}
+.add-ex-link{min-height:44px;}
+.day-check{min-height:44px;}
+.del-btn{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-tertiary);font-size:var(--fs-sec);}
+.del-btn.del-x:active{color:var(--loss);}
+.rest-btns button{min-width:44px;min-height:44px;}
+.clear-x::before{content:"";position:absolute;inset:-10px;}
+.close-btn{width:44px;height:44px;margin-right:calc(var(--s-3) * -1);background:none;border:none;color:var(--text-secondary);font-size:var(--fs-title);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.hex-row input{min-height:44px;}
+.hex-row .pill{min-height:44px;}
+.bottom-nav-item{min-height:44px;}
+
+/* Logging inputs: stacked rows, - and + at 48px, labels above */
+.stepper-list{display:flex;flex-direction:column;gap:var(--s-3);margin-bottom:var(--s-3);}
+.stepper-field .stepper-label{margin-bottom:var(--s-1);}
+.stepper-row{display:flex;align-items:center;gap:var(--s-2);}
+.stepper-row input{flex:1;min-width:0;height:48px;padding:0 var(--s-2);text-align:center;font-size:var(--fs-body);font-weight:var(--fw-body);-moz-appearance:textfield;}
+.stepper-row input::-webkit-outer-spin-button,.stepper-row input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.step-btn{width:48px;height:48px;flex:0 0 48px;border-radius:var(--r-input);background:var(--surface-2);border:1px solid var(--border);color:var(--text-primary);font-size:var(--fs-title);font-weight:var(--fw-body);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+.step-btn:active{background:var(--border);}
+.warm-row{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s-2);}
+.chip{min-height:44px;padding:0 var(--s-4);border-radius:var(--r-input);background:var(--surface-2);border:1px solid var(--border);color:var(--text-primary);font-size:var(--fs-sec);font-weight:var(--fw-title);cursor:pointer;}
+.chip.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+.helper{font-size:var(--fs-label);color:var(--text-tertiary);line-height:1.4;}
+
+/* Settings */
+.toggle-row{min-height:44px;cursor:pointer;}
+input.ios-switch{-webkit-appearance:none;appearance:none;position:relative;width:51px;height:31px;margin:0;border-radius:var(--r-pill);background:var(--surface-2);border:1px solid var(--border);flex:0 0 auto;cursor:pointer;transition:background-color .2s,border-color .2s;}
+input.ios-switch::after{content:"";position:absolute;top:1px;left:1px;width:27px;height:27px;border-radius:50%;background:var(--text-primary);box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s,background-color .2s;}
+input.ios-switch:checked{background:var(--accent);border-color:var(--accent);}
+input.ios-switch:checked::after{transform:translateX(20px);background:var(--on-accent);}
+.select-wrap{position:relative;}
+.select-wrap::after{content:"";position:absolute;right:var(--s-4);top:50%;width:8px;height:8px;border-right:2px solid var(--text-secondary);border-bottom:2px solid var(--text-secondary);transform:translateY(-70%) rotate(45deg);pointer-events:none;}
+.select-wrap select.scope{-webkit-appearance:none;appearance:none;width:100%;min-height:44px;margin:0;padding:0 calc(var(--s-4) * 2 + 8px) 0 var(--s-4);background:var(--surface);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--r-input);font-size:var(--fs-body);font-weight:var(--fw-body);}
+.sheet-grip{width:36px;height:5px;border-radius:var(--r-pill);background:var(--border);margin:calc(var(--s-2) - var(--s-4)) auto var(--s-3);}
+.sheet-settings{scrollbar-width:none;-ms-overflow-style:none;}
+.sheet-settings::-webkit-scrollbar{display:none;}

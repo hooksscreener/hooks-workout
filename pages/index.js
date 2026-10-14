@@ -482,7 +482,7 @@ const INCLINE_IMPORT_DATA = [
   { date: "2026-08-08", workoutId: "push", exercise: "Incline Bench", weight: 185, reps: 6, sets: 3 },
 ];
 
-// ---- Accent colours for the honeycomb picker (centre = the default Bloomberg orange) -------------------
+// ---- Accent colors for the honeycomb picker (centre = the default Bloomberg orange) -------------------
 const HONEY_COLORS = [
   "#ff6600",
   "#ffb000", "#f5d90a", "#7ed957", "#1ecbe1", "#5b8cff", "#b26bff",
@@ -618,13 +618,13 @@ function IconGear({ size = 18 }) { return <svg width={size} height={size} viewBo
 function IconTarget({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" fill={color} /></svg>; }
 function IconBook({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" /><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /></svg>; }
 
-// A honeycomb of hexagonal colour swatches: the centre one is the default, two rings around it.
+// A honeycomb of hexagonal color swatches: the centre one is the default, two rings around it.
 function HoneyPicker({ value, onPick }) {
   const SIZE = 19, SQ3 = Math.sqrt(3);
   const spots = [[0, 0], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1], [2, 0], [1, 1], [0, 2], [-1, 2], [-2, 2], [-2, 1], [-2, 0], [-1, -1], [0, -2], [1, -2], [2, -2], [2, -1]];
   const hexPts = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 180) * (60 * i - 30); return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`; }).join(" ");
   return (
-    <svg viewBox="-125 -105 250 210" style={{ width: "100%", maxWidth: 300, display: "block", margin: "0 auto" }} role="radiogroup" aria-label="Accent colour">
+    <svg viewBox="-86 -78 172 156" style={{ width: "100%", maxWidth: 206, display: "block", margin: "16px auto 24px" }} role="radiogroup" aria-label="Accent color">
       {spots.map(([q, r], i) => {
         const cx = SIZE * SQ3 * (q + r / 2), cy = SIZE * 1.5 * r;
         const color = HONEY_COLORS[i];
@@ -833,7 +833,7 @@ function DotField() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return; // no canvas support: fall back to a plain black background
     const GRID = 16, BASE_RADIUS = 1;
-    // Tuned by eye in a real browser. A dot's colour scales from black (wave far away) up to this
+    // Tuned by eye in a real browser. A dot's color scales from black (wave far away) up to this
     // at the crest: a warm amber that stays tiny and discrete, never neon.
     const CREST = [141, 106, 53];
     const PEAK_RADIUS = 0.45;        // px a dot grows at the crest (1px -> 1.45px)
@@ -1023,7 +1023,7 @@ export default function Home() {
     setPasscode(passInput.trim());
   };
 
-  // ---- Look & feel: dark / light / system and one accent colour, remembered on this device ----------
+  // ---- Look & feel: dark / light / system and one accent color, remembered on this device ----------
   useEffect(() => {
     try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) }); } catch (e) { /* ignore */ }
   }, []);
@@ -1433,6 +1433,14 @@ export default function Home() {
   const [heatmapInfoOpen, setHeatmapInfoOpen] = useState(false);
 
   const [digestOpen, setDigestOpen] = useState(false);
+  // Vibration only exists on Android-style browsers; hide its switch anywhere it can't work (iOS, desktop).
+  const [canVibrate, setCanVibrate] = useState(false);
+  useEffect(() => {
+    try {
+      const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      setCanVibrate(typeof navigator.vibrate === "function" && !ios);
+    } catch (e) { /* ignore */ }
+  }, []);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [progCleared, setProgCleared] = useState(false);
   useEffect(() => {
@@ -1830,9 +1838,9 @@ export default function Home() {
         <span className="num">
           {e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
           {compact && e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)" }}>(warm-up)</span>}
-          <button className="del-btn" onClick={() => startEdit(e)} title="Edit">✎</button>
+          <button className="del-btn" onClick={() => startEdit(e)} title="Edit" aria-label="Edit set">✎</button>
           <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: "var(--fs-label)", fontWeight: 600, color: e.isWarmup ? "var(--text-primary)" : "var(--text-secondary)" }}>W</button>
-          <button className="del-btn" onClick={() => deleteEntry(e.id)} aria-label="Delete set"><span className="x-circle">✕</span></button>
+          <button className="del-btn del-x" onClick={() => deleteEntry(e.id)} aria-label="Delete set">✕</button>
         </span>
       </div>
     )
@@ -2037,21 +2045,22 @@ export default function Home() {
               </div>
             )}
 
-            <div className="row3" style={{ marginTop: 12 }}>
-              {[["weight", "lbs", "decimal", 5], ["sets", "sets", "numeric", 1], ["reps", "reps", "numeric", 1]].map(([key, ph, mode, step]) => (
+            <div className="stepper-list" style={{ marginTop: 12 }}>
+              {[["weight", "Weight (lbs)", "lbs", "decimal", 5], ["sets", "Sets", "sets", "numeric", 1], ["reps", "Reps", "reps", "numeric", 1]].map(([key, label, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
-                  <input type="number" inputMode={mode} placeholder={ph} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-                  <div className="stepper-btns">
-                    <button type="button" aria-label={`Increase ${ph}`} onClick={() => bumpForm(key, step)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg></button>
-                    <button type="button" aria-label={`Decrease ${ph}`} onClick={() => bumpForm(key, -step)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg></button>
+                  <div className="label-sm stepper-label">{label}</div>
+                  <div className="stepper-row">
+                    <button type="button" className="step-btn" aria-label={`Decrease ${label}`} onClick={() => bumpForm(key, -step)}>−</button>
+                    <input type="number" inputMode={mode} placeholder={ph} aria-label={label} value={form[key]} onFocus={(e) => { const t = e.target; setTimeout(() => t.select(), 0); }} onMouseUp={(e) => e.preventDefault()} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+                    <button type="button" className="step-btn" aria-label={`Increase ${label}`} onClick={() => bumpForm(key, step)}>+</button>
                   </div>
                 </div>
               ))}
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--fs-label)", color: "var(--text-secondary)", cursor: "pointer" }}>
-              <input type="checkbox" checked={form.isWarmup} onChange={(e) => setForm({ ...form, isWarmup: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--accent)" }} />
-              Warm-up set (won't count toward recommendations or your top set)
-            </label>
+            <div className="warm-row">
+              <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
+              <div className="helper">Warm-up sets don't count toward recommendations or your top set</div>
+            </div>
           </div>
 
           {todaysEntries.length > 0 && (
@@ -2264,10 +2273,11 @@ export default function Home() {
       {settingsOpen && (
         <>
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
-          <div className="sheet" role="dialog" aria-label="Settings">
+          <div className="sheet sheet-settings" role="dialog" aria-label="Settings">
+            <div className="sheet-grip" />
             <div className="sheet-head">
               <span className="sheet-title">Settings</span>
-              <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-title)" }} onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
+              <button className="close-btn" onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
             </div>
 
             <div className="label-sm">Appearance</div>
@@ -2277,23 +2287,25 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="label-sm" style={{ marginTop: 4 }}>Accent colour</div>
+            <div className="label-sm" style={{ marginTop: 4, marginBottom: 0 }}>Accent color</div>
             <HoneyPicker value={settings.accent} onPick={(c) => { updateSettings({ accent: c }); setHexDraft(""); }} />
             <div className="hex-row">
-              <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex colour" />
+              <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex color" />
               <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
               <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
             </div>
 
             <div className="label-sm" style={{ marginTop: 16 }}>Lifter's Digest</div>
-            <label className="toggle-row"><span>AI digest (more detail and the likely why)</span><input type="checkbox" checked={settings.ai} onChange={(e) => updateSettings({ ai: e.target.checked })} /></label>
-            <select className="scope" value={settings.goal} onChange={(e) => updateSettings({ goal: e.target.value })} aria-label="Training goal" style={{ marginBottom: 0, marginTop: 4 }}>
-              {GOALS.map((g) => <option key={g.key} value={g.key}>Goal: {g.label}</option>)}
-            </select>
+            <label className="toggle-row"><span>AI digest (more detail and the likely why)</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.ai} onChange={(e) => updateSettings({ ai: e.target.checked })} /></label>
+            <div className="select-wrap">
+              <select className="scope" value={settings.goal} onChange={(e) => updateSettings({ goal: e.target.value })} aria-label="Training goal">
+                {GOALS.map((g) => <option key={g.key} value={g.key}>Goal: {g.label}</option>)}
+              </select>
+            </div>
 
             <div className="label-sm" style={{ marginTop: 16 }}>Sounds &amp; vibration</div>
-            <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
-            <label className="toggle-row"><span>Vibration (Android; not available on iPhone web apps)</span><input type="checkbox" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>
+            <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
+            {canVibrate && <label className="toggle-row"><span>Vibration</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>}
 
             <div className="label-sm" style={{ marginTop: 16 }}>Tell us what you think</div>
             <textarea className="feedback-box" rows={3} value={feedbackText} onChange={(e) => { setFeedbackText(e.target.value); setFeedbackStatus(""); }} placeholder="What's confusing, missing or great?" />
