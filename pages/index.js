@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { deriveTheme } from "../lib/theme";
+import { unlockAudio, playClick, playWoodTriple, playBell, vibrate, VIBE } from "../lib/fx";
 
 const LINE_COLORS = ["#ff6600", "#00d4ff", "#ffb000", "#ff3b3b", "#7CFC00", "#c792ea", "#ff6ec7", "#5ee6d0", "#a0d911", "#9a8c98"];
 
@@ -24,6 +26,7 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
+const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -470,18 +473,124 @@ const INCLINE_IMPORT_DATA = [
   { date: "2026-08-08", workoutId: "push", exercise: "Incline Bench", weight: 185, reps: 6, sets: 3 },
 ];
 
+// ---- Accent colours for the honeycomb picker (centre = the default Bloomberg orange) -------------------
+const HONEY_COLORS = [
+  "#ff6600",
+  "#ffb000", "#f5d90a", "#7ed957", "#1ecbe1", "#5b8cff", "#b26bff",
+  "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
+];
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true };
+
+// ---- Digest: the numbers behind the cards -------------------------------------------------------------
+// Compares the last 30 days with the 30 before. The app does the math; the AI (or the plain fallback
+// below) only words it, so the cards can't invent figures.
+const DIGEST_WINDOW = 30;
+const hashStr = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+
+function computeDigestStats({ strengthEntries, dayStats, todayIso }) {
+  const curStart = shiftDate(todayIso, -(DIGEST_WINDOW - 1));
+  const prevStart = shiftDate(todayIso, -(2 * DIGEST_WINDOW - 1));
+  const prevEnd = shiftDate(curStart, -1);
+  const byEx = {};
+  strengthEntries.forEach((e) => { if (e.date >= prevStart) (byEx[e.exercise] = byEx[e.exercise] || []).push(e); });
+  const sess = (arr) => new Set(arr.map((e) => e.date)).size;
+  const setsOf = (arr) => arr.reduce((t, e) => t + Math.max(1, e.sets || 1), 0);
+  const topW = (arr) => Math.max(...arr.map((e) => e.weight));
+  const best = (arr) => arr.reduce((b, e) => (!b || estE1RM(e.weight, e.reps) > estE1RM(b.weight, b.reps) ? e : b), null);
+  const perWeek = (n) => Math.round((n / (DIGEST_WINDOW / 7)) * 10) / 10;
+  const lifts = [], stalled = [];
+  Object.entries(byEx).forEach(([name, list]) => {
+    const cur = list.filter((e) => e.date >= curStart), prev = list.filter((e) => e.date <= prevEnd);
+    if (sess(list) >= 3 && plateauFlag(list)) stalled.push(name);
+    if (!cur.length || !prev.length) return;
+    const bc = best(cur), bp = best(prev);
+    const ec = estE1RM(bc.weight, bc.reps), ep = estE1RM(bp.weight, bp.reps);
+    const wc = topW(cur), wp = topW(prev);
+    const drivers = [];
+    if (wc !== wp) drivers.push(`top weight ${wc > wp ? "up" : "down"} from ${wp} to ${wc} lbs`);
+    const prevAtW = prev.filter((e) => e.weight === wc);
+    if (prevAtW.length) {
+      const rc = Math.max(...cur.filter((e) => e.weight === wc).map((e) => e.reps)), rp = Math.max(...prevAtW.map((e) => e.reps));
+      if (rc !== rp) drivers.push(`best reps at ${wc} lbs ${rc > rp ? "up" : "down"} from ${rp} to ${rc}`);
+    }
+    if (sess(cur) !== sess(prev)) drivers.push(`${sess(cur)} sessions vs ${sess(prev)} in the prior 30 days`);
+    if (setsOf(cur) !== setsOf(prev)) drivers.push(`about ${perWeek(setsOf(cur))} sets a week vs ${perWeek(setsOf(prev))}`);
+    lifts.push({ name, changePct: Math.round(((ec - ep) / ep) * 1000) / 10, bestNow: `${bc.weight} x ${bc.reps}`, bestBefore: `${bp.weight} x ${bp.reps}`, e1rmNow: ec, e1rmBefore: ep, drivers });
+  });
+  const improving = lifts.filter((l) => l.changePct >= 2).sort((a, b) => b.changePct - a.changePct).slice(0, 3);
+  const slipping = lifts.filter((l) => l.changePct <= -2).sort((a, b) => a.changePct - b.changePct).slice(0, 3);
+  const flagged = new Set([...improving, ...slipping].map((l) => l.name));
+  const overdue = dayStats.filter((d) => d.days >= 4 && d.days !== Infinity).sort((a, b) => b.days - a.days).slice(0, 2).map((d) => ({ day: d.workout.name, daysSinceFullSession: d.days }));
+  const curSessions = sess(strengthEntries.filter((e) => e.date >= curStart)), prevSessions = sess(strengthEntries.filter((e) => e.date >= prevStart && e.date <= prevEnd));
+  return { windowDays: DIGEST_WINDOW, improving, slipping, stalled: stalled.filter((n) => !flagged.has(n)).slice(0, 3), overdue, trainingDaysNow: curSessions, trainingDaysBefore: prevSessions, liftsCompared: lifts.length };
+}
+
+// Plain-English cards built straight from the stats, used when the AI isn't available.
+function digestFallback(stats) {
+  if (!stats) return [];
+  const cards = [];
+  const why = (l) => (l.drivers.length ? ` Likely driver: ${l.drivers[0]}.` : "");
+  if (stats.improving.length) {
+    const l = stats.improving[0];
+    const others = stats.improving.slice(1).map((x) => `${x.name} +${x.changePct}%`).join(", ");
+    cards.push({ title: "Improving", tone: "up", body: `${l.name} is up ${l.changePct}% (best ${l.bestNow} vs ${l.bestBefore}).${why(l)}${others ? ` Also: ${others}.` : ""}` });
+  }
+  if (stats.slipping.length) {
+    const l = stats.slipping[0];
+    cards.push({ title: "Slipping", tone: "down", body: `${l.name} is down ${Math.abs(l.changePct)}% (best ${l.bestNow} vs ${l.bestBefore}).${why(l)}` });
+  } else if (stats.stalled.length) {
+    cards.push({ title: "Flat lately", tone: "down", body: `${stats.stalled.join(", ")} ${stats.stalled.length > 1 ? "have" : "has"} held steady for 3 sessions. Check today's plan on the Workout tab.` });
+  }
+  if (stats.overdue.length) {
+    cards.push({ title: "Due soon", tone: "rest", body: stats.overdue.map((o) => `${o.day}: ${o.daysSinceFullSession} days since a full session`).join(". ") + "." });
+  }
+  if (!cards.length) cards.push({ title: "Keep logging", tone: "info", body: "The digest compares the last 30 days with the 30 before. A few more weeks of logs and it will have something to say." });
+  return cards.slice(0, 4);
+}
+
 const NAV_ICON_PROPS = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
 function IconHome({ color, size }) { return <svg {...NAV_ICON_PROPS} width={size || NAV_ICON_PROPS.width} height={size || NAV_ICON_PROPS.height} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
 function IconDumbbell({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color} style={{ transform: "rotate(45deg)" }}><path d="M6 7v10M18 7v10" /><path d="M2 10v4M22 10v4" /><path d="M6 12h12" strokeWidth="3" /></svg>; }
 function IconChart({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 20V4" /><path d="M4 20h16" /><path d="M7 16l4-5 3 3 5-7" /></svg>; }
 function IconBulb({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a6 6 0 00-4 10.5c.7.6 1 1.3 1 2.5h6c0-1.2.3-1.9 1-2.5A6 6 0 0012 2z" /></svg>; }
+function IconGear({ size = 18 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" /></svg>; }
 function IconTarget({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" fill={color} /></svg>; }
 function IconBook({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" /><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /></svg>; }
+
+// A honeycomb of hexagonal colour swatches: the centre one is the default, two rings around it.
+function HoneyPicker({ value, onPick }) {
+  const SIZE = 19, SQ3 = Math.sqrt(3);
+  const spots = [[0, 0], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1], [2, 0], [1, 1], [0, 2], [-1, 2], [-2, 2], [-2, 1], [-2, 0], [-1, -1], [0, -2], [1, -2], [2, -2], [2, -1]];
+  const hexPts = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 180) * (60 * i - 30); return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`; }).join(" ");
+  return (
+    <svg viewBox="-125 -105 250 210" style={{ width: "100%", maxWidth: 300, display: "block", margin: "0 auto" }} role="radiogroup" aria-label="Accent colour">
+      {spots.map(([q, r], i) => {
+        const cx = SIZE * SQ3 * (q + r / 2), cy = SIZE * 1.5 * r;
+        const color = HONEY_COLORS[i];
+        const on = (value || "").toLowerCase() === color;
+        return (
+          <polygon key={color} points={hexPts(cx, cy, SIZE * 0.97)} fill={color} stroke={on ? "var(--chalk)" : "var(--ink)"} strokeWidth={on ? 3 : 1.5} strokeLinejoin="round"
+            role="radio" aria-checked={on} aria-label={color} style={{ cursor: "pointer" }} onClick={() => onPick(color)} />
+        );
+      })}
+    </svg>
+  );
+}
 
 function PortfolioChart({ rows, maRows, color, onScrub }) {
   const [activeIndex, setActiveIndex] = useState(null);
   const svgRef = useRef(null);
-  const W = 340, H = 170, padL = 4, padR = 4, padT = 10, padB = 4;
+  // Measure the real box so the line runs edge to edge with nothing letterboxed.
+  const [box, setBox] = useState({ w: 340, h: 170 });
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return undefined;
+    const measure = () => { const r = el.getBoundingClientRect(); if (r.width > 0 && r.height > 0) setBox((b) => (Math.abs(b.w - r.width) > 0.5 || Math.abs(b.h - r.height) > 0.5 ? { w: r.width, h: r.height } : b)); };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [rows.length]);
+  const W = box.w, H = box.h, padL = 0, padR = 0, padT = 12, padB = 2;
   const n = rows.length;
   const vals = rows.map((r) => r.value);
   const maVals = (maRows || []).filter((v) => v !== null && v !== undefined);
@@ -523,7 +632,8 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      style={{ width: "100%", height: 190, touchAction: "none", cursor: "crosshair", ...NO_SELECT }}
+      className="pf-chart"
+      style={{ width: "100%", touchAction: "none", cursor: "crosshair", ...NO_SELECT }}
       onContextMenu={(e) => e.preventDefault()}
       {...handlers}
     >
@@ -552,7 +662,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       </g>
       <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="var(--mute)" strokeWidth="1" strokeDasharray="2,4" opacity="0.7" />
       {maRuns.map((run, i) => (
-        <polyline key={i} points={run.join(" ")} fill="none" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="1,3" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+        <polyline key={i} points={run.join(" ")} fill="none" stroke="var(--ma)" strokeWidth="1.5" strokeDasharray="1,3" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
       ))}
       <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {active && (
@@ -739,6 +849,13 @@ export default function Home() {
   const [authError, setAuthError] = useState(null);
 
   const [loaded, setLoaded] = useState(false);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hexDraft, setHexDraft] = useState("");
+  const [me, setMe] = useState(null);                       // { role: "owner" | "tester", name }
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState("");
+  const [feedbackList, setFeedbackList] = useState(null);
   const [workouts, setWorkouts] = useState(DEFAULT_WORKOUTS);
   const [exercises, setExercises] = useState(DEFAULT_EXERCISES);
   const [entries, setEntries] = useState([]);
@@ -750,13 +867,15 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [calendarOpen, setCalendarOpen] = useState(false);
 
-  const [showWorkoutMenu, setShowWorkoutMenu] = useState(false);
-  const [newWorkoutName, setNewWorkoutName] = useState("");
 
   const [form, setForm] = useState({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false });
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addingExercise, setAddingExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState("");
+  const [newExerciseBrand, setNewExerciseBrand] = useState("");
+  const [newExerciseDays, setNewExerciseDays] = useState([]); // workout ids the new exercise belongs to
+  const [progQuery, setProgQuery] = useState("");   // the Progress search box (independent of the log search)
+  const [progOpen, setProgOpen] = useState(false);
   const draftsRef = useRef({});                 // each exercise's weight / sets / reps while you move between lifts
   const [recentExercises, setRecentExercises] = useState([]); // exercises logged this visit, newest first (for the swap button)
   const [dupPrompt, setDupPrompt] = useState(null); // { typed, existing } when a new name looks like an existing one
@@ -841,6 +960,62 @@ export default function Home() {
     setPasscode(passInput.trim());
   };
 
+  // ---- Look & feel: dark / light / system and one accent colour, remembered on this device ----------
+  useEffect(() => {
+    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) }); } catch (e) { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+    const apply = () => {
+      const t = deriveTheme(settings.mode, settings.accent, mq ? mq.matches : false);
+      const root = document.documentElement;
+      root.setAttribute("data-theme", t.scheme);
+      Object.keys(t.vars).forEach((k) => root.style.setProperty(k, t.vars[k]));
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", t.themeColor);
+    };
+    apply();
+    if (settings.mode === "system" && mq && mq.addEventListener) { mq.addEventListener("change", apply); return () => mq.removeEventListener("change", apply); }
+    return undefined;
+  }, [settings.mode, settings.accent]);
+  const updateSettings = (patch) => setSettings((cur) => {
+    const next = { ...cur, ...patch };
+    try { localStorage.setItem("hooksSettings", JSON.stringify(next)); } catch (e) { /* ignore */ }
+    return next;
+  });
+  // Browsers only allow sound after a tap, so wake the audio engine on the first touch.
+  useEffect(() => {
+    const wake = () => { unlockAudio(); window.removeEventListener("pointerdown", wake); };
+    window.addEventListener("pointerdown", wake);
+    return () => window.removeEventListener("pointerdown", wake);
+  }, []);
+  const fx = (kind) => {
+    if (kind === "click") { if (settings.sound) playClick(); if (settings.vibe) vibrate(VIBE.click); }
+    else if (kind === "warning") { if (settings.sound) playWoodTriple(); if (settings.vibe) vibrate(VIBE.warning); }
+    else if (kind === "done") { if (settings.sound) playBell(); if (settings.vibe) vibrate(VIBE.done); }
+  };
+  const authHeaders = () => ({ "x-app-passcode": passcode });
+  useEffect(() => {
+    if (!passcode) return;
+    fetch("/api/me", { headers: { "x-app-passcode": passcode } }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setMe(d); }).catch(() => {});
+  }, [passcode]);
+  const sendFeedback = async () => {
+    const message = feedbackText.trim();
+    if (!message) return;
+    setFeedbackStatus("Sending…");
+    try {
+      const res = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ message }) });
+      if (res.ok) { setFeedbackText(""); setFeedbackStatus("Sent. Thank you."); } else setFeedbackStatus(res.status === 429 ? "That's enough for today." : "Couldn't send, try again.");
+    } catch (e) { setFeedbackStatus("Couldn't send, check your connection."); }
+  };
+  const loadFeedback = async () => {
+    try {
+      const res = await fetch("/api/feedback", { headers: authHeaders() });
+      if (res.ok) setFeedbackList((await res.json()).items || []);
+    } catch (e) { /* ignore */ }
+  };
+  const signOut = () => { try { localStorage.removeItem(PASSCODE_KEY); } catch (e) { /* ignore */ } window.location.reload(); };
+
   const persist = async (next) => {
     const payload = {
       ...next,
@@ -877,27 +1052,27 @@ export default function Home() {
     return searchExercises(q, allExerciseNames, 8);
   }, [form.exercise, allExerciseNames, recentExercises]);
 
-  const createWorkout = () => {
-    const name = newWorkoutName.trim();
-    if (!name) return;
-    const id = `w-${Date.now()}`;
-    persist({ workouts: [...workouts, { id, name }], exercises: { ...exercises, [id]: [] }, entries });
-    setActiveWorkoutId(id); setNewWorkoutName(""); setShowWorkoutMenu(false);
-  };
-
   // Adding a name that looks like one you already have ("Calf Raise" vs "Calf Raises") asks first.
-  const addExerciseToList = (name, workoutId = activeWorkoutId, force = false) => {
-    const trimmed = name.trim();
-    if (!trimmed) return false;
-    const list = exercises[workoutId] || [];
-    if (list.some((e) => e.toLowerCase() === trimmed.toLowerCase())) return true;
+  // An exercise can belong to several days; each day it's ticked for lists it.
+  const composeExerciseName = (name, brand) => [brand.trim(), name.trim()].filter(Boolean).join(" ");
+  const addExerciseToList = (name, dayIds, force = false, brand = "") => {
+    const trimmed = composeExerciseName(name, brand);
+    if (!trimmed || !dayIds.length) return false;
     if (!force) {
       const similar = findSimilarExercise(trimmed, allExerciseNames);
-      if (similar) { setDupPrompt({ typed: trimmed, existing: similar, kind: "add" }); return false; }
+      if (similar) { setDupPrompt({ typed: trimmed, existing: similar, kind: "add", days: dayIds }); return false; }
     }
-    persist({ workouts, exercises: { ...exercises, [workoutId]: [...list, trimmed] }, entries });
+    const nextEx = { ...exercises };
+    dayIds.forEach((id) => {
+      const list = nextEx[id] || [];
+      if (!list.some((e) => e.toLowerCase() === trimmed.toLowerCase())) nextEx[id] = [...list, trimmed];
+    });
+    persist({ workouts, exercises: nextEx, entries });
+    setActiveWorkoutId(dayIds[0]);
+    selectExercise(trimmed);
     return true;
   };
+  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseDays([]); };
 
   // Which workout an exercise "lives in" is decided by where it's already listed, not by
   // whichever tab happens to be open — so logging a Squat always files as Legs regardless
@@ -981,7 +1156,8 @@ export default function Home() {
   const [recExercise, setRecExercise] = useState(null);
   const [manualWeight, setManualWeight] = useState("");
   const [manualReps, setManualReps] = useState("");
-  const recSetCount = Math.min(8, Math.max(1, Number(form.sets) || 3));
+  // The plan always lays out at least 4 working sets; the Sets box only says how many you log per entry.
+  const recSetCount = Math.min(8, Math.max(4, Number(form.sets) || 4));
   const recommendation = useMemo(
     () => buildRecommendation(recExercise, recSetCount, manualWeight, manualReps),
     [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode]
@@ -1001,12 +1177,16 @@ export default function Home() {
     setShowSuggestions(false);
     setDupPrompt(null);
     setRecentExercises((r) => [name, ...r.filter((n) => n !== name)].slice(0, 8));
+    // The log search drives the Progress chart (one way: browsing Progress never changes the log).
+    if ((entriesByExercise[name] || []).length) { setChartFocusExercise(name); setHistoryAll(false); setEditingId(null); setMergeOpen(false); }
+    const home = findExerciseHome(name);
+    if (home) setActiveWorkoutId(home);
   };
   const swapTarget = recentExercises.find((n) => n !== form.exercise.trim()) || null;
 
   const startRest = (name) => {
     const total = restSecondsFor(name);
-    setRestTimer({ total, endsAt: Date.now() + total * 1000, exercise: name, done: false });
+    setRestTimer({ total, endsAt: Date.now() + total * 1000, exercise: name, done: false, warned: false });
   };
   useEffect(() => {
     if (!restTimer) return undefined;
@@ -1017,18 +1197,28 @@ export default function Home() {
   const restRemaining = restTimer ? Math.ceil((restTimer.endsAt - restNow) / 1000) : 0;
   useEffect(() => {
     if (!restTimer) return;
+    // Ten seconds out: three slow wood-block knocks (and three slow pulses where the phone allows).
+    if (restRemaining <= 10 && restRemaining > 0 && !restTimer.warned && restTimer.total > 10) {
+      fx("warning");
+      setRestTimer((t) => (t ? { ...t, warned: true } : t));
+    }
     if (restRemaining <= 0 && !restTimer.done) {
-      try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (err) { /* not supported */ }
+      fx("done");
       setRestTimer((t) => (t ? { ...t, done: true } : t));
     }
     if (restRemaining <= -45) setRestTimer(null);
   }, [restRemaining]);
-  const nudgeRest = (secs) => setRestTimer((t) => (t ? { ...t, endsAt: t.endsAt + secs * 1000, total: Math.max(15, t.total + secs), done: false } : t));
+  const nudgeRest = (secs) => setRestTimer((t) => (t ? { ...t, endsAt: t.endsAt + secs * 1000, total: Math.max(15, t.total + secs), done: false, warned: false } : t));
 
   // ---- Logging -------------------------------------------------------------------------------------
   const submitSet = (nameOverride, skipDupCheck) => {
     const exerciseName = (nameOverride || form.exercise).trim();
     if (!exerciseName || !form.weight) return;
+    if (!skipDupCheck && !allExerciseNames.some((n) => n.toLowerCase() === exerciseName.toLowerCase()) && !findSimilarExercise(exerciseName, allExerciseNames)) {
+      // A brand-new lift needs its day(s) first, so open the add form with the name filled in.
+      setAddingExercise(true); setNewExerciseName(exerciseName); setNewExerciseDays([]);
+      return;
+    }
     if (!skipDupCheck) {
       const similar = findSimilarExercise(exerciseName, allExerciseNames);
       if (similar) { setDupPrompt({ typed: exerciseName, existing: similar, kind: "log" }); return; }
@@ -1040,6 +1230,7 @@ export default function Home() {
     persist({ workouts, exercises: nextExercises, entries: [entry, ...entries] });
     draftsRef.current[exerciseName] = { weight: form.weight, sets: form.sets, reps: form.reps };
     setRecentExercises((r) => [exerciseName, ...r.filter((n) => n !== exerciseName)].slice(0, 8));
+    fx("click");
     if (!form.isWarmup) startRest(exerciseName);
     setForm((f) => ({ ...f, exercise: exerciseName, isWarmup: false }));
     if (allExerciseNames.some((n) => n.toLowerCase() === exerciseName.toLowerCase()) || nextExercises !== exercises) setRecExercise(exerciseName);
@@ -1232,24 +1423,88 @@ export default function Home() {
     return () => window.removeEventListener("resize", measure);
   }, [loaded, passcode]);
 
-  // Whichever other workout has gone longest without a session, as a one-tap suggestion. Warm-up
-  // sets don't count as training a workout.
-  const dueWorkout = useMemo(() => {
+  // A day only counts as trained on a date when at least 3 different exercises from it were logged
+  // that day (so calves tacked onto every session don't reset the Legs clock). An exercise counts
+  // toward every day it's listed under. If a day has never had a 3-exercise session, its last date
+  // with anything logged is used so it doesn't go blank.
+  const DAY_MIN_EXERCISES = 3;
+  const dayStats = useMemo(() => {
     const todayIso = todayISO();
-    const daysSinceTrained = (workoutId) => {
-      const wEntries = strengthEntries.filter((e) => e.workoutId === workoutId);
-      if (!wEntries.length) return Infinity;
-      const lastDate = wEntries.reduce((max, e) => (e.date > max ? e.date : max), wEntries[0].date);
-      return daysBetween(lastDate, todayIso);
-    };
-    const candidates = workouts
-      .filter((w) => w.id !== activeWorkoutId)
-      .map((w) => ({ workout: w, days: daysSinceTrained(w.id) }))
-      .filter((c) => c.days >= 3);
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.days - a.days);
-    return candidates[0];
-  }, [workouts, strengthEntries, activeWorkoutId]);
+    const wkStart = weekStartISO(todayIso);
+    return workouts.map((w) => {
+      const names = new Set((exercises[w.id] || []).map((n) => n.toLowerCase()));
+      const belongs = (e) => e.workoutId === w.id || names.has(e.exercise.toLowerCase());
+      const byDate = {};
+      let weekSets = 0, lastAny = null;
+      strengthEntries.forEach((e) => {
+        if (!belongs(e)) return;
+        (byDate[e.date] = byDate[e.date] || new Set()).add(e.exercise);
+        if (!lastAny || e.date > lastAny) lastAny = e.date;
+        if (e.date >= wkStart) weekSets += Math.max(1, e.sets || 1);
+      });
+      let lastFull = null;
+      Object.keys(byDate).forEach((d) => { if (byDate[d].size >= DAY_MIN_EXERCISES && (!lastFull || d > lastFull)) lastFull = d; });
+      const last = lastFull || lastAny;
+      return { workout: w, days: last ? daysBetween(last, todayIso) : Infinity, weekSets };
+    });
+  }, [workouts, exercises, strengthEntries]);
+
+  const dueWorkout = useMemo(() => {
+    const c = dayStats.filter((d) => d.days >= 3);
+    if (!c.length) return null;
+    return c.slice().sort((a, b) => b.days - a.days)[0];
+  }, [dayStats]);
+
+  // What you usually log first on a given day, and which lift tends to follow which, both read from
+  // the order sets were logged in (entries are stored newest first).
+  const sessionOrders = useMemo(() => {
+    const byDate = {};
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.isWarmup) continue;
+      const seq = (byDate[e.date] = byDate[e.date] || []);
+      if (seq[seq.length - 1] !== e.exercise) seq.push(e.exercise);
+    }
+    return Object.values(byDate);
+  }, [entries]);
+  const nextMap = useMemo(() => {
+    const m = {};
+    sessionOrders.forEach((seq) => { for (let i = 0; i < seq.length - 1; i++) { const a = seq[i], b = seq[i + 1]; if (a === b) continue; ((m[a] = m[a] || {})[b] = (m[a][b] || 0) + 1); } });
+    return m;
+  }, [sessionOrders]);
+  const nextTarget = useMemo(() => {
+    if (!recExercise || !nextMap[recExercise]) return null;
+    const doneToday = new Set(todaysEntries.map((e) => e.exercise));
+    const opts = Object.entries(nextMap[recExercise]).filter(([n, c]) => c >= 2 && !doneToday.has(n)).sort((a, b) => b[1] - a[1]);
+    return opts.length ? opts[0][0] : null;
+  }, [recExercise, nextMap, todaysEntries]);
+  const startDay = (workoutId) => {
+    const names = new Set((exercises[workoutId] || []).map((n) => n.toLowerCase()));
+    const counts = {};
+    sessionOrders.forEach((seq) => { const first = seq.find((n) => names.has(n.toLowerCase())); if (first) counts[first] = (counts[first] || 0) + 1; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    const pick = top ? top[0] : (exercises[workoutId] || [])[0];
+    setActiveWorkoutId(workoutId);
+    if (pick) selectExercise(pick);
+  };
+
+  // ---- Digest cards: stats computed here, worded by the AI when it's available, plain text otherwise ----
+  const digestStats = useMemo(() => (loaded && strengthEntries.length ? computeDigestStats({ strengthEntries, dayStats, todayIso: todayISO() }) : null), [loaded, strengthEntries, dayStats]);
+  const digestSig = useMemo(() => (digestStats ? hashStr(JSON.stringify(digestStats)) : ""), [digestStats]);
+  const [aiCards, setAiCards] = useState(null);
+  useEffect(() => {
+    if (!digestStats || !passcode) return undefined;
+    let cancelled = false;
+    const key = `hooksDigest:${todayISO()}:${digestSig}`;
+    try { const c = localStorage.getItem(key); if (c) { setAiCards(JSON.parse(c)); return undefined; } } catch (e) { /* ignore */ }
+    setAiCards(null);
+    fetch("/api/digest", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify({ stats: digestStats }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (cancelled || !d || !Array.isArray(d.cards) || !d.cards.length) return; setAiCards(d.cards); try { localStorage.setItem(key, JSON.stringify(d.cards)); } catch (e) { /* ignore */ } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [digestSig, passcode]);
+  const digestCards = aiCards && aiCards.length ? aiCards : digestFallback(digestStats);
 
   const insights = useMemo(() => {
     const list = [];
@@ -1519,7 +1774,7 @@ export default function Home() {
     <>
     <DotField />
     <div className="wrap">
-      <button className="import-shortcut-btn" onClick={() => scrollToSection("import")} aria-label="Import & backup"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4" /><path d="M7 9l5-5 5 5" /><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" /></svg></button>
+      <button className="import-shortcut-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear /></button>
 
       {saveError && <div className="warn">{saveError}</div>}
 
@@ -1588,6 +1843,33 @@ export default function Home() {
             );
           })()}
 
+          <div className="digest">
+            <div className="insights-head">
+              <span className="label-sm" style={{ marginBottom: 0 }}>Digest{aiCards ? <span className="ai-tag">AI</span> : null}</span>
+              <span className="insight-count">swipe</span>
+            </div>
+            <div className="digest-row">
+              <div className="digest-card week-card">
+                <div className="digest-title">This week</div>
+                <div className="week-tiles">
+                  {dayStats.map((d) => (
+                    <button key={d.workout.id} className={"week-tile" + (dueWorkout && dueWorkout.workout.id === d.workout.id ? " due" : "")} onClick={() => { scrollToSection("home"); startDay(d.workout.id); }}>
+                      <span className="wt-name">{d.workout.name}</span>
+                      <span className="wt-sets">{d.weekSets} sets</span>
+                      <span className="wt-ago">{d.days === Infinity ? "never" : d.days === 0 ? "today" : `${d.days}d ago`}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {digestCards.map((c, i) => (
+                <div key={i} className={"digest-card tone-" + c.tone}>
+                  <div className="digest-title">{c.title}</div>
+                  <div className="digest-body">{c.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <button className="log-set-row" onClick={() => scrollToSection("home")}>
             <span>Log a set</span>
             <span style={{ color: "var(--mute)", fontSize: 20 }}>›</span>
@@ -1596,30 +1878,13 @@ export default function Home() {
 
         {/* ---------------- WORKOUT (search, today's target, log) ---------------- */}
         <div ref={(el) => (sectionRefs.current.home = el)} className="workout-section">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-            <div style={{ position: "relative" }}>
-              <button className="title-btn" onClick={() => setShowWorkoutMenu((v) => !v)} style={{ marginBottom: 0 }}>
-                {activeWorkout?.name}
-                <span style={{ color: "var(--mute)", fontSize: 18 }}>▾</span>
+          {dueWorkout && (
+            <div style={{ marginBottom: 14 }}>
+              <button className="due-pill" onClick={() => startDay(dueWorkout.workout.id)}>
+                Try {dueWorkout.workout.name} · {dueWorkout.days === Infinity ? "never done" : `${dueWorkout.days} days`} · tap to start
               </button>
-              {showWorkoutMenu && (
-                <div className="dropdown left anchored">
-                  {workouts.map((w) => (
-                    <button key={w.id} className="item" style={{ color: w.id === activeWorkoutId ? "var(--iron)" : "var(--chalk)" }} onClick={() => { setActiveWorkoutId(w.id); setShowWorkoutMenu(false); }}>{w.name}</button>
-                  ))}
-                  <div className="new-row">
-                    <input value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="New workout name" style={{ padding: "7px 10px", fontSize: 16, flex: 1 }} />
-                    <button className="btn-iron" onClick={createWorkout} style={{ padding: "0 10px" }}>+</button>
-                  </div>
-                </div>
-              )}
             </div>
-            {dueWorkout && (
-              <button className="due-pill" onClick={() => { setActiveWorkoutId(dueWorkout.workout.id); setShowWorkoutMenu(false); }}>
-                Try {dueWorkout.workout.name} · {dueWorkout.days === Infinity ? "never done" : `${dueWorkout.days} days`}
-              </button>
-            )}
-          </div>
+          )}
           <div className="date-row">
             <button onClick={() => setSelectedDate((d) => shiftDate(d, -1))}>‹</button>
             <button className="date-pill" onClick={() => setCalendarOpen((v) => !v)}>{fmtDateFull(selectedDate)}</button>
@@ -1653,10 +1918,19 @@ export default function Home() {
                 </div>
               )}
             </div>
-            {swapTarget && (
-              <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
-                <span style={{ fontSize: 15 }}>⇄</span> Switch to {swapTarget}
-              </button>
+            {(swapTarget || nextTarget) && (
+              <div className="nav-row">
+                {swapTarget && (
+                  <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
+                    <span style={{ fontSize: 15 }}>⇄</span> Switch to {swapTarget}
+                  </button>
+                )}
+                {nextTarget && nextTarget !== swapTarget && (
+                  <button className="swap-btn next-btn" onClick={() => selectExercise(nextTarget)} aria-label={`Next exercise ${nextTarget}`}>
+                    Next: {nextTarget} <span style={{ fontSize: 15 }}>›</span>
+                  </button>
+                )}
+              </div>
             )}
 
             {recExercise && (
@@ -1667,7 +1941,7 @@ export default function Home() {
             )}
 
             {!recExercise ? (
-              <div className="rec-empty">Pick an exercise to see today's target. Type a new name to add it.</div>
+              <div className="rec-empty">Pick an exercise to see today's target, or tap + Add new exercise.</div>
             ) : recommendation?.noData ? (
               <div className="rec-card">
                 <div className="label-sm">What's your strongest set?</div>
@@ -1708,11 +1982,11 @@ export default function Home() {
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="btn-iron" style={{ flex: 1, padding: "10px 6px", fontSize: 12 }} onClick={() => {
                     if (dupPrompt.kind === "log") { setRecExercise(dupPrompt.existing); submitSet(dupPrompt.existing, true); }
-                    else { selectExercise(dupPrompt.existing); setAddingExercise(false); setNewExerciseName(""); }
+                    else { selectExercise(dupPrompt.existing); resetAddForm(); }
                   }}>Use {dupPrompt.existing}</button>
                   <button className="pill" style={{ flex: 1, padding: "10px 6px", fontSize: 12 }} onClick={() => {
                     if (dupPrompt.kind === "log") submitSet(dupPrompt.typed, true);
-                    else { addExerciseToList(dupPrompt.typed, activeWorkoutId, true); setAddingExercise(false); setNewExerciseName(""); setDupPrompt(null); }
+                    else { addExerciseToList(dupPrompt.typed, dupPrompt.days || [activeWorkoutId], true); resetAddForm(); setDupPrompt(null); }
                   }}>Keep as new</button>
                 </div>
               </div>
@@ -1750,31 +2024,58 @@ export default function Home() {
             {!addingExercise ? (
               <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
             ) : (
-              <div className="add-ex-row" style={{ marginBottom: 0, flex: 1, marginRight: 12 }}>
-                <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" />
-                <button className="btn-iron" onClick={() => { if (addExerciseToList(newExerciseName)) { setNewExerciseName(""); setAddingExercise(false); } }}>Add</button>
-              </div>
+              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={resetAddForm}>Cancel new exercise</button>
             )}
             <button className="add-ex-link" style={{ marginBottom: 0, flexShrink: 0 }} onClick={clearForm}>Clear All</button>
           </div>
+          {addingExercise && (
+            <div className="card add-card">
+              <div className="label-sm">New exercise</div>
+              <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 10 }} />
+              <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 12 }} />
+              <datalist id="machine-brands">{MACHINE_BRANDS.map((b) => <option key={b} value={b} />)}</datalist>
+              <div className="label-sm" style={{ marginBottom: 6 }}>Which day(s)? Tick any that apply</div>
+              <div className="day-checks">
+                {workouts.map((w) => (
+                  <label key={w.id} className={"day-check" + (newExerciseDays.includes(w.id) ? " on" : "")}>
+                    <input type="checkbox" checked={newExerciseDays.includes(w.id)} onChange={() => setNewExerciseDays((d) => (d.includes(w.id) ? d.filter((x) => x !== w.id) : [...d, w.id]))} />
+                    {w.name}
+                  </label>
+                ))}
+              </div>
+              <button className="btn-iron save-btn" disabled={!newExerciseName.trim() || !newExerciseDays.length} style={{ opacity: newExerciseName.trim() && newExerciseDays.length ? 1 : 0.5, marginTop: 12 }}
+                onClick={() => { if (addExerciseToList(newExerciseName, newExerciseDays, false, newExerciseBrand)) resetAddForm(); }}>
+                Add exercise
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ---------------- PROGRESS ---------------- */}
         <div ref={(el) => (sectionRefs.current.charts = el)} className="section-block">
           <div className="label-sm" style={{ marginBottom: 14 }}>Progress</div>
           {(() => {
-            const withData = allExerciseNames.filter((ex) => (entriesByExercise[ex] || []).length > 0).sort((a, b) => a.localeCompare(b));
-            const groups = {};
-            withData.forEach((ex) => { const L = (ex[0] || "#").toUpperCase(); (groups[L] = groups[L] || []).push(ex); });
+            const withData = allExerciseNames.filter((ex) => (entriesByExercise[ex] || []).length > 0);
+            const lastDate = (ex) => (entriesByExercise[ex][0] || {}).date || "";
+            const q = progQuery.trim();
+            const matches = q ? searchExercises(q, withData, 8) : withData.slice().sort((a, b) => (lastDate(a) < lastDate(b) ? 1 : -1)).slice(0, 8);
+            const pickProg = (ex) => { setChartFocusExercise(ex); setProgOpen(false); setProgQuery(""); setMergeOpen(false); setHistoryAll(false); setEditingId(null); };
             return (
-              <select className="scope" value={chartFocusExercise || ""} onChange={(e) => { setChartFocusExercise(e.target.value || null); setMergeOpen(false); setHistoryAll(false); setEditingId(null); }}>
-                {!chartFocusExercise && <option value="">Select an exercise…</option>}
-                {Object.keys(groups).sort().map((L) => (
-                  <optgroup key={L} label={L}>
-                    {groups[L].map((ex) => <option key={ex} value={ex}>{ex}</option>)}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="ex-input-wrap" style={{ marginBottom: 12 }}>
+                <input
+                  className="ex-input"
+                  placeholder="Search an exercise"
+                  value={progOpen ? progQuery : (chartFocusExercise || "")}
+                  onChange={(e) => setProgQuery(e.target.value)}
+                  onFocus={(e) => { setProgOpen(true); setProgQuery(""); e.target.select && e.target.select(); }}
+                  onBlur={() => setTimeout(() => setProgOpen(false), 150)}
+                />
+                {progOpen && matches.length > 0 && (
+                  <div className="suggestions">
+                    {matches.map((s2) => <button key={s2} onMouseDown={(ev) => ev.preventDefault()} onClick={() => pickProg(s2)}>{s2}</button>)}
+                  </div>
+                )}
+              </div>
             );
           })()}
           <div className="pills">
@@ -1911,6 +2212,65 @@ export default function Home() {
           </div>
         </>
         </div>
+        </>
+      )}
+
+      {settingsOpen && (
+        <>
+          <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
+          <div className="sheet" role="dialog" aria-label="Settings">
+            <div className="sheet-head">
+              <span style={{ fontSize: 20, fontWeight: 800, textTransform: "uppercase" }}>Settings</span>
+              <button className="add-ex-link" style={{ marginBottom: 0, fontSize: 22 }} onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
+            </div>
+
+            <div className="label-sm">Appearance</div>
+            <div className="pills">
+              {[["dark", "Dark"], ["light", "Light"], ["system", "Match phone"]].map(([k, label]) => (
+                <button key={k} className={"pill" + (settings.mode === k ? " active" : "")} onClick={() => updateSettings({ mode: k })}>{label}</button>
+              ))}
+            </div>
+
+            <div className="label-sm" style={{ marginTop: 6 }}>Accent colour</div>
+            <HoneyPicker value={settings.accent} onPick={(c) => { updateSettings({ accent: c }); setHexDraft(""); }} />
+            <div className="hex-row">
+              <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex colour" />
+              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 14px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
+              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 14px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
+            </div>
+
+            <div className="label-sm" style={{ marginTop: 18 }}>Sounds &amp; vibration</div>
+            <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
+            <label className="toggle-row"><span>Vibration (Android; not available on iPhone web apps)</span><input type="checkbox" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>
+
+            <div className="label-sm" style={{ marginTop: 18 }}>Tell us what you think</div>
+            <textarea className="feedback-box" rows={3} value={feedbackText} onChange={(e) => { setFeedbackText(e.target.value); setFeedbackStatus(""); }} placeholder="What's confusing, missing or great?" />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+              <button className="btn-iron" style={{ padding: "10px 18px", fontSize: 13 }} onClick={sendFeedback} disabled={!feedbackText.trim()}>Send feedback</button>
+              <span className="muted" style={{ fontSize: 12 }}>{feedbackStatus}</span>
+            </div>
+            {me && me.role === "owner" && (
+              <div style={{ marginTop: 12 }}>
+                <button className="add-ex-link" style={{ marginBottom: 8 }} onClick={loadFeedback}>View feedback from testers</button>
+                {feedbackList && (feedbackList.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>Nothing yet.</div> : (
+                  <div className="today-list">
+                    {feedbackList.map((f, i) => (
+                      <div key={i} className="hist-item" style={{ display: "block" }}>
+                        <div className="muted" style={{ fontSize: 11 }}>{f.name} · {new Date(f.at).toLocaleString()}</div>
+                        <div style={{ fontSize: 13, marginTop: 2 }}>{f.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="label-sm" style={{ marginTop: 18 }}>Data</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "10px 14px" }} onClick={() => { setSettingsOpen(false); setTimeout(() => scrollToSection("import"), 50); }}>Import &amp; backup</button>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "10px 14px" }} onClick={signOut}>Sign out{me ? ` (${me.name})` : ""}</button>
+            </div>
+          </div>
         </>
       )}
 

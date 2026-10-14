@@ -1,7 +1,7 @@
 import { Redis } from "@upstash/redis";
+import { resolveUser } from "../../lib/auth";
 
 const redis = Redis.fromEnv();
-const KEY = "hooks-workout-data";
 
 const DEFAULT_WORKOUTS = [
   { id: "push", name: "Push" },
@@ -22,18 +22,16 @@ const DEFAULT_EXERCISES = {
 const DEFAULT_DATA = { workouts: DEFAULT_WORKOUTS, exercises: DEFAULT_EXERCISES, entries: [] };
 
 export default async function handler(req, res) {
-  const passcode = req.headers["x-app-passcode"];
-  if (!process.env.APP_PASSCODE || passcode !== process.env.APP_PASSCODE) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  const user = resolveUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
 
   try {
     if (req.method === "GET") {
-      const data = await redis.get(KEY);
+      const data = await redis.get(user.key);
       return res.status(200).json(data || DEFAULT_DATA);
     }
     if (req.method === "POST") {
-      await redis.set(KEY, req.body);
+      await redis.set(user.key, req.body);
       return res.status(200).json({ ok: true });
     }
     return res.status(405).json({ error: "Method not allowed" });
