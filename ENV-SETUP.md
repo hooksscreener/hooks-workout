@@ -6,6 +6,7 @@ New:
 - TESTER_CODES   comma-separated "Name:code" pairs, one per tester. Example: Sam:river-47,Maya:oak-82
                  Each tester signs in with their code and gets their own empty data. Remove a pair to revoke access.
 - ANTHROPIC_API_KEY   from console.anthropic.com. Without it the Digest still shows plain-text cards (no AI).
-- DIGEST_MODEL   optional, defaults to claude-haiku-5-5.
+- DIGEST_MODEL   optional, defaults to claude-haiku-5-5. Use claude-sonnet-5-5 for richer wording during the tester week.
+- DIGEST_AI   optional master switch, "on" (default) or "off". Off means Claude is never called and everyone sees the basic digest. Each person can also turn AI off in Settings. If the key is missing or a call fails, the basic digest shows automatically.
 
 Redeploy after changing variables. Tester feedback appears in Settings > "View feedback from testers" when signed in with APP_PASSCODE.
