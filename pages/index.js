@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { deriveTheme } from "../lib/theme";
+import { deriveTheme, deriveFonts } from "../lib/theme";
 import { unlockAudio, playClick, playWoodTriple, playBell, vibrate, VIBE } from "../lib/fx";
 
 const LINE_COLORS = ["#ff6600", "#00d4ff", "#ffb000", "#ff3b3b", "#7CFC00", "#c792ea", "#ff6ec7", "#5ee6d0", "#a0d911", "#9a8c98"];
@@ -144,6 +144,119 @@ function useHoldScrub(getIndex, onIndex, elRef) {
   return { onPointerDown, onPointerMove, onPointerUp: end, onPointerCancel: end, onPointerLeave: end };
 }
 const NO_SELECT = { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
+
+// Best set of each day as an estimated 1RM, as a % change from the first point, one row per calendar
+// day (days off carry the last value forward). Used by the exercise page and the carousel cards.
+function buildExSeries(list, fromISO, toISOd) {
+  const byDay = {};
+  list.forEach((e) => { if (!e.isWarmup) byDay[e.date] = pickBest(byDay[e.date], e); });
+  const dates = Object.keys(byDay).sort().filter((d) => d >= fromISO && d <= toISOd);
+  if (dates.length < 2) return null;
+  const val = (d) => estE1RM(byDay[d].weight, byDay[d].reps);
+  const base = val(dates[0]);
+  const rows = [];
+  let cur = base;
+  for (let d = dates[0]; d <= toISOd; d = shiftDate(d, 1)) {
+    if (byDay[d]) cur = val(d);
+    rows.push({ date: d, label: fmtDate(d), value: Math.round(((cur - base) / base) * 10000) / 100 });
+  }
+  const first = byDay[dates[0]], latest = byDay[dates[dates.length - 1]];
+  return { rows, pct: rows[rows.length - 1].value, sessions: dates.length, first, latest, e1rmNow: val(dates[dates.length - 1]), e1rmBest: Math.max(...dates.map(val)), dates };
+}
+
+// A plain-English read on one exercise, built only from the logged numbers.
+function exSummary(name, series, list, ytd) {
+  if (!series) return `Not enough sessions of ${name} in this range yet. Log it a couple more times and a trend shows up here.`;
+  const per = ytd ? "this year" : "in this range";
+  const parts = [`${series.sessions} sessions ${per}.`];
+  parts.push(`Best set went from ${series.first.weight} x ${series.first.reps} to ${series.latest.weight} x ${series.latest.reps}, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}% in estimated 1RM.`);
+  if (series.e1rmNow >= series.e1rmBest) parts.push("The latest session is your best in this range.");
+  else parts.push(`Your best estimated 1RM in this range was ${series.e1rmBest}, so you are ${Math.round(((series.e1rmBest - series.e1rmNow) / series.e1rmBest) * 100)}% under it.`);
+  if (plateauFlag(list.filter((e) => !e.isWarmup))) parts.push("It has held steady for the last 3 sessions.");
+  return parts.join(" ");
+}
+
+
+const estE5RM = (weight, reps) => Math.round(estE1RM(weight, reps) / (1 + 5 / 30));
+const fmtNum = (n) => Math.round(n).toLocaleString("en-US");
+const defaultTicker = (name) => {
+  const words = String(name).replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  const first = words[0];
+  if (first.length >= 5 || words.length === 1) return first.slice(0, 5).toUpperCase();
+  return (first + words.slice(1).join("")).slice(0, 5).toUpperCase();
+};
+// Stats for one exercise. Working sets only. rangeFrom/rangeTo bound the "this range" numbers.
+function exStats(list, fromISO, toISOd) {
+  const work = list.filter((e) => !e.isWarmup);
+  if (!work.length) return null;
+  const vol = (arr) => arr.reduce((a, e) => a + e.weight * Math.max(e.reps, 0) * (e.sets || 1), 0);
+  const inR = work.filter((e) => e.date >= fromISO && e.date <= toISOd);
+  const best = work.reduce((b, e) => (!b || estE1RM(e.weight, e.reps) > estE1RM(b.weight, b.reps) ? e : b), null);
+  const pr = work.reduce((b, e) => (!b || e.weight > b.weight ? e : b), null);
+  const reps = inR.reduce((a, e) => a + Math.max(e.reps, 0) * (e.sets || 1), 0);
+  const sets = inR.reduce((a, e) => a + (e.sets || 1), 0);
+  const dates = [...new Set(inR.map((e) => e.date))];
+  const last = work.reduce((b, e) => (!b || e.date > b.date ? e : b), null);
+  const allDates = [...new Set(work.map((e) => e.date))].sort();
+  return {
+    e1rm: estE1RM(best.weight, best.reps), e5rm: estE5RM(best.weight, best.reps),
+    volume: vol(inR), sessions: dates.length, sets, reps,
+    prWeight: pr.weight, prDate: pr.date,
+    avgPerRep: reps > 0 ? Math.round(vol(inR) / reps) : 0,
+    lastDate: last.date, lastSet: last,
+    allVolume: vol(work), firstDate: allDates[0], allSessions: allDates.length,
+  };
+}
+
+// iPhone-style row: drag right to reveal Edit, drag left to reveal Delete; a long drag runs the action.
+function SwipeRow({ onEdit, onDelete, children }) {
+  const [dx, setDx] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const st = useRef(null);
+  const REVEAL = 88, FULL = 150;
+  const down = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (e.clientX < 20) { st.current = null; return; } // leave the screen edge to the iOS back gesture
+    st.current = { x: e.clientX, y: e.clientY, mode: null, base: dx };
+  };
+  const move = (e) => {
+    const s0 = st.current;
+    if (!s0) return;
+    const ddx = e.clientX - s0.x, ddy = e.clientY - s0.y;
+    if (!s0.mode) {
+      if (Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) { s0.mode = "swipe"; setDragging(true); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
+      else if (Math.abs(ddy) > 8) { s0.mode = "scroll"; return; }
+      else return;
+    }
+    if (s0.mode === "swipe") setDx(Math.max(-220, Math.min(220, s0.base + ddx)));
+  };
+  const up = () => {
+    const s0 = st.current;
+    st.current = null;
+    if (!s0 || s0.mode !== "swipe") return;
+    setDragging(false);
+    if (dx >= FULL) { setDx(0); onEdit(); }
+    else if (dx <= -FULL) { setDx(0); onDelete(); }
+    else if (dx > 44) setDx(REVEAL);
+    else if (dx < -44) setDx(-REVEAL);
+    else setDx(0);
+  };
+  const cancel = () => { st.current = null; setDragging(false); setDx(0); };
+  return (
+    <div className="swipe-wrap">
+      <div className="swipe-actions">
+        <button type="button" className="sw-edit" onClick={() => { setDx(0); onEdit(); }} tabIndex={dx > 0 ? 0 : -1}>Edit</button>
+        <button type="button" className="sw-del" onClick={() => { setDx(0); onDelete(); }} tabIndex={dx < 0 ? 0 : -1}>Delete</button>
+      </div>
+      <div className={"swipe-body" + (dragging ? " dragging" : "")} style={{ transform: `translateX(${dx}px)` }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}
+        onClickCapture={(e) => { if (dx !== 0) { e.stopPropagation(); e.preventDefault(); setDx(0); } }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function SvgChart({ rows, series, mode, metric }) {
   const [activeIdx, setActiveIdx] = useState(null);
@@ -488,7 +601,9 @@ const HONEY_COLORS = [
   "#ffb000", "#f5d90a", "#7ed957", "#1ecbe1", "#5b8cff", "#b26bff",
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength" };
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false };
+const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
+const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
   { key: "strength", label: "Build strength" },
   { key: "muscle", label: "Build muscle" },
@@ -676,6 +791,78 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
   };
   const handlers = useHoldScrub(getIndex, setActive, svgRef);
 
+  // The shaded area is a field of real dots on a canvas, so the ones around your finger can swell
+  // while you hold: about 3 dots to each side and 6 below the line.
+  const baseRef = useRef(null), hotRef = useRef(null);
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined") return undefined;
+    const mo = new MutationObserver(() => setThemeTick((t) => t + 1));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme"] });
+    return () => mo.disconnect();
+  }, []);
+  const DOT_GAP = 3.2;
+  const resolveColor = (c) => {
+    const m = /^var\((--[a-z-]+)\)$/.exec(c || "");
+    return m ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || "#34C759" : c;
+  };
+  const lineYAt = (px) => {
+    const f = Math.min(n - 1, Math.max(0, (px - padL) / ((W - padL - padR) / (n - 1))));
+    const i0 = Math.floor(f), i1 = Math.min(n - 1, i0 + 1), fr = f - i0;
+    return y(rows[i0].value) * (1 - fr) + y(rows[i1].value) * fr;
+  };
+  const fadeAt = (gy) => { const f = gy / H; return f <= 0.7 ? 1 - 0.65 * (f / 0.7) : 0.35 * Math.max(0, 1 - (f - 0.7) / 0.3); };
+  const setupCanvas = (cv) => {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(W * dpr)), h = Math.max(1, Math.round(H * dpr));
+    if (cv.width !== w) cv.width = w;
+    if (cv.height !== h) cv.height = h;
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    return ctx;
+  };
+  useEffect(() => {
+    const cv = baseRef.current;
+    if (!cv || n < 2) return;
+    const ctx = setupCanvas(cv);
+    ctx.fillStyle = resolveColor(color);
+    for (let gx = 1.6; gx < W; gx += DOT_GAP) {
+      const ly = lineYAt(gx);
+      for (let gy = 1.6; gy < H; gy += DOT_GAP) {
+        if (gy < ly) continue;
+        const a = fadeAt(gy);
+        if (a < 0.02) continue;
+        ctx.globalAlpha = a;
+        ctx.beginPath(); ctx.arc(gx, gy, 0.9, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  });
+  useEffect(() => {
+    const cv = hotRef.current;
+    if (!cv || n < 2) return;
+    const ctx = setupCanvas(cv);
+    if (activeIndex === null || !rows[activeIndex]) return;
+    const ax = x(activeIndex), ay = y(rows[activeIndex].value);
+    const rx = 3.5 * DOT_GAP, ry = 6.5 * DOT_GAP;
+    ctx.fillStyle = resolveColor(color);
+    const startX = Math.floor((ax - rx) / DOT_GAP) * DOT_GAP + 1.6;
+    for (let gx = startX; gx < ax + rx; gx += DOT_GAP) {
+      if (gx < 0 || gx > W) continue;
+      const ly = lineYAt(gx);
+      for (let gy = Math.floor(ay / DOT_GAP) * DOT_GAP + 1.6; gy < ay + ry; gy += DOT_GAP) {
+        if (gy < ly || gy > H) continue;
+        const dx = (gx - ax) / rx, dy = (gy - ay) / ry, d2 = dx * dx + dy * dy;
+        if (d2 >= 1) continue;
+        const k = (1 - d2) * (1 - d2);
+        ctx.globalAlpha = Math.min(1, fadeAt(gy) + 0.55 * k);
+        ctx.beginPath(); ctx.arc(gx, gy, 0.9 + 1.5 * k, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  });
+
   if (n < 2) return <div className="empty">Log more sessions across a few exercises to see this.</div>;
 
   const pts = rows.map((r, i) => `${x(i)},${y(r.value)}`).join(" ");
@@ -692,6 +879,9 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
   }
 
   return (
+    <>
+    <canvas ref={baseRef} className="pf-dots" aria-hidden="true" />
+    <canvas ref={hotRef} className="pf-dots" aria-hidden="true" />
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
@@ -720,9 +910,6 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       {[0.2, 0.4, 0.6, 0.8].map((t, i) => (
         <line key={i} x1={padL} y1={padT + t * (H - padT - padB)} x2={W - padR} y2={padT + t * (H - padT - padB)} stroke="var(--border)" strokeWidth="1" opacity="0.5" />
       ))}
-      <g clipPath="url(#portfolioAreaClip)" mask="url(#portfolioFadeMask)">
-        <rect x="0" y="0" width={W} height={H} fill="url(#portfolioDots)" />
-      </g>
       <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,4" opacity="0.7" />
       {maRuns.map((run, i) => (
         <polyline key={i} points={run.join(" ")} fill="none" stroke="var(--ma)" strokeWidth="1.5" strokeDasharray="1,3" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
@@ -736,6 +923,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
         </g>
       )}
     </svg>
+    </>
   );
 }
 
@@ -924,6 +1112,8 @@ export default function Home() {
   const [entries, setEntries] = useState([]);
   const [restDays, setRestDays] = useState([]);
   const [progressionMode, setProgressionMode] = useState("weight"); // "weight" | "reps"
+  const [tickers, setTickers] = useState({});
+  const tickerOf = (name) => (tickers && tickers[name]) || defaultTicker(name);
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
@@ -936,6 +1126,7 @@ export default function Home() {
   const [addingExercise, setAddingExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newExerciseBrand, setNewExerciseBrand] = useState("");
+  const [newExerciseTicker, setNewExerciseTicker] = useState("");
   const [newExerciseDays, setNewExerciseDays] = useState([]); // workout ids the new exercise belongs to
   const [progQuery, setProgQuery] = useState("");   // the Progress search box (independent of the log search)
   const [progOpen, setProgOpen] = useState(false);
@@ -985,13 +1176,14 @@ export default function Home() {
         nextEntries = nextEntries.map((e) => (e.workoutId === "legsB" ? { ...e, workoutId: "legsA" } : e));
         if (activeWorkoutId === "legsB") setActiveWorkoutId("legsA");
         // Save the merge immediately so it only ever needs to run once.
-        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode });
+        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode, tickers: data.tickers || {} });
       }
 
       setWorkouts(nextWorkouts);
       setExercises(nextExercises);
       setEntries(nextEntries);
       setRestDays(nextRestDays);
+      setTickers(data.tickers || {});
       setProgressionMode(nextProgressionMode);
       setLoaded(true);
       setAuthError(null);
@@ -1034,13 +1226,16 @@ export default function Home() {
       const root = document.documentElement;
       root.setAttribute("data-theme", t.scheme);
       Object.keys(t.vars).forEach((k) => root.style.setProperty(k, t.vars[k]));
+      const fv = deriveFonts(settings.fontText, settings.fontNum);
+      Object.keys(fv).forEach((k) => root.style.setProperty(k, fv[k]));
+      if (settings.glass) root.setAttribute("data-nav", "glass"); else root.removeAttribute("data-nav");
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute("content", t.themeColor);
     };
     apply();
     if (settings.mode === "system" && mq && mq.addEventListener) { mq.addEventListener("change", apply); return () => mq.removeEventListener("change", apply); }
     return undefined;
-  }, [settings.mode, settings.accent]);
+  }, [settings.mode, settings.accent, settings.fontText, settings.fontNum, settings.glass]);
   const updateSettings = (patch) => setSettings((cur) => {
     const next = { ...cur, ...patch };
     try { localStorage.setItem("hooksSettings", JSON.stringify(next)); } catch (e) { /* ignore */ }
@@ -1084,7 +1279,9 @@ export default function Home() {
       ...next,
       restDays: next.restDays !== undefined ? next.restDays : restDays,
       progressionMode: next.progressionMode !== undefined ? next.progressionMode : progressionMode,
+      tickers: next.tickers !== undefined ? next.tickers : tickers,
     };
+    setTickers(payload.tickers || {});
     setWorkouts(payload.workouts); setExercises(payload.exercises); setEntries(payload.entries); setRestDays(payload.restDays); setProgressionMode(payload.progressionMode);
     try {
       const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(payload) });
@@ -1130,12 +1327,13 @@ export default function Home() {
       const list = nextEx[id] || [];
       if (!list.some((e) => e.toLowerCase() === trimmed.toLowerCase())) nextEx[id] = [...list, trimmed];
     });
-    persist({ workouts, exercises: nextEx, entries });
+    const tk = newExerciseTicker.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+    persist({ workouts, exercises: nextEx, entries, tickers: tk ? { ...tickers, [trimmed]: tk } : tickers });
     setActiveWorkoutId(dayIds[0]);
     selectExercise(trimmed);
     return true;
   };
-  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseDays([]); };
+  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseTicker(""); setNewExerciseDays([]); };
 
   // Which workout an exercise "lives in" is decided by where it's already listed, not by
   // whichever tab happens to be open — so logging a Squat always files as Legs regardless
@@ -1309,7 +1507,22 @@ export default function Home() {
 
   const clearForm = () => { setForm({ exercise: "", weight: "", sets: "", reps: "", isWarmup: false }); setRecExercise(null); setManualWeight(""); setManualReps(""); setShowSuggestions(false); setDupPrompt(null); };
 
-  const deleteEntry = (id) => persist({ workouts, exercises, entries: entries.filter((e) => e.id !== id) });
+  const deleteEntry = (id) => {
+    const index = entries.findIndex((e) => e.id === id);
+    if (index === -1) return;
+    const entry = entries[index];
+    persist({ workouts, exercises, entries: entries.filter((e) => e.id !== id) });
+    setUndoDel({ entry, index });
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndoDel(null), 6000);
+  };
+  const undoDelete = () => {
+    if (!undoDel) return;
+    const next = entries.slice();
+    next.splice(Math.min(undoDel.index, next.length), 0, undoDel.entry);
+    persist({ workouts, exercises, entries: next });
+    setUndoDel(null);
+  };
   const toggleWarmup = (id) => persist({ workouts, exercises, entries: entries.map((e) => (e.id === id ? { ...e, isWarmup: !e.isWarmup } : e)) });
 
   const [editingId, setEditingId] = useState(null);
@@ -1543,17 +1756,37 @@ export default function Home() {
     }
     return Object.values(byDate);
   }, [entries]);
+  // Next-exercise suggestions only learn from the last 14 days, so a changed routine takes over quickly.
+  const NEXT_WINDOW_DAYS = 14;
+  const recentOrders = useMemo(() => {
+    const cutoff = shiftDate(todayISO(), -(NEXT_WINDOW_DAYS - 1));
+    const byDate = {};
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.isWarmup || e.date < cutoff) continue;
+      const seq = (byDate[e.date] = byDate[e.date] || []);
+      if (seq[seq.length - 1] !== e.exercise) seq.push(e.exercise);
+    }
+    return Object.values(byDate);
+  }, [entries]);
   const nextMap = useMemo(() => {
     const m = {};
-    sessionOrders.forEach((seq) => { for (let i = 0; i < seq.length - 1; i++) { const a = seq[i], b = seq[i + 1]; if (a === b) continue; ((m[a] = m[a] || {})[b] = (m[a][b] || 0) + 1); } });
+    recentOrders.forEach((seq) => { for (let i = 0; i < seq.length - 1; i++) { const a = seq[i], b = seq[i + 1]; if (a === b) continue; ((m[a] = m[a] || {})[b] = (m[a][b] || 0) + 1); } });
     return m;
-  }, [sessionOrders]);
+  }, [recentOrders]);
   const nextTarget = useMemo(() => {
     if (!recExercise || !nextMap[recExercise]) return null;
     const doneToday = new Set(todaysEntries.map((e) => e.exercise));
-    const opts = Object.entries(nextMap[recExercise]).filter(([n, c]) => c >= 2 && !doneToday.has(n)).sort((a, b) => b[1] - a[1]);
+    // Only suggest lifts that share a workout day with this one (Bench can lead to Incline, not Squat).
+    const lc = (n) => n.toLowerCase();
+    const sameDay = new Set();
+    workouts.forEach((w) => {
+      const names = (exercises[w.id] || []).map(lc);
+      if (names.includes(lc(recExercise))) names.forEach((n) => sameDay.add(n));
+    });
+    const opts = Object.entries(nextMap[recExercise]).filter(([n, c]) => c >= 1 && !doneToday.has(n) && sameDay.has(lc(n))).sort((a, b) => b[1] - a[1]);
     return opts.length ? opts[0][0] : null;
-  }, [recExercise, nextMap, todaysEntries]);
+  }, [recExercise, nextMap, todaysEntries, workouts, exercises]);
   const startDay = (workoutId) => {
     const names = new Set((exercises[workoutId] || []).map((n) => n.toLowerCase()));
     const counts = {};
@@ -1794,6 +2027,67 @@ export default function Home() {
     triggerDownload([header, ...rows].join("\n"), `hooks-workout-sets-${todayISO()}.csv`, "text/csv");
   };
 
+  // ---- Exercise page (opened from a history date or a carousel card) ----------------------------------
+  const [xpage, setXpage] = useState(null);        // { exercise, date, ytd }
+  const [xEdit, setXEdit] = useState(false);
+  const [xScrub, setXScrub] = useState(null);
+  const [undoDel, setUndoDel] = useState(null);     // { entry, index }
+  const undoTimer = useRef(null);
+  const openExercise = (exercise, date, ytd) => { setXpage({ exercise, date, ytd: !!ytd }); setXEdit(false); setXScrub(null); setEditingId(null); };
+  const closeExercise = () => { setXpage(null); setXEdit(false); setXScrub(null); setEditingId(null); };
+  useEffect(() => {
+    if (!xpage) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [!!xpage]);
+  const xData = useMemo(() => {
+    if (!xpage) return null;
+    const list = entriesByExercise[xpage.exercise] || [];
+    const today = todayISO();
+    const from = xpage.ytd ? `${today.slice(0, 4)}-01-01` : "0000-01-01";
+    const to = xpage.ytd ? today : xpage.date;
+    const series = buildExSeries(list, from, to);
+    const dayEntries = list.filter((e) => e.date === xpage.date);
+    return { list, series, dayEntries, summary: exSummary(xpage.exercise, series, list.filter((e) => e.date >= from && e.date <= to), xpage.ytd) };
+  }, [xpage, entriesByExercise]);
+  const xStats = useMemo(() => {
+    if (!xpage) return null;
+    const list = entriesByExercise[xpage.exercise] || [];
+    const today = todayISO();
+    return exStats(list, xpage.ytd ? `${today.slice(0, 4)}-01-01` : "0000-01-01", xpage.ytd ? today : xpage.date);
+  }, [xpage, entriesByExercise]);
+
+  // ---- Carousel: pull down at the top of Overall to see each lift's year-to-date change ----
+  const [carouselOpen, setCarouselOpen] = useState(false);
+  const carouselItems = useMemo(() => {
+    const today = todayISO(), from = `${today.slice(0, 4)}-01-01`;
+    const items = [];
+    Object.entries(entriesByExerciseStrength).forEach(([name, list]) => {
+      const ser = buildExSeries(list, from, today);
+      if (ser) items.push({ name, pct: ser.pct, e1rm: ser.e1rmNow, last: list[0].date });
+    });
+    items.sort((a, b) => (a.last < b.last ? 1 : -1));
+    return items.slice(0, 12);
+  }, [entriesByExerciseStrength]);
+  const allLiftsYtd = useMemo(() => {
+    const rows = portfolioSeries.rows;
+    if (rows.length < 2) return null;
+    const from = `${todayISO().slice(0, 4)}-01-01`;
+    let i = rows.findIndex((r) => r.date >= from);
+    if (i === -1) return null;
+    if (i > 0) i -= 1;
+    if (rows.length - i < 2) return null;
+    return Math.round(((rows[rows.length - 1].value - rows[i].value) / rows[i].value) * 1000) / 10;
+  }, [portfolioSeries]);
+  const pull = useRef(null);
+  const onPullStart = (e) => { pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
+  const onPullMove = (e) => {
+    if (pull.current === null) return;
+    const dy = e.touches[0].clientY - pull.current;
+    if (dy > 56 && window.scrollY <= 0) { setCarouselOpen(true); pull.current = null; }
+  };
+
   if (passcode === null) return null;
 
   if (!passcode) {
@@ -1830,6 +2124,13 @@ export default function Home() {
           <button className="del-btn" onClick={cancelEdit}>✕</button>
         </span>
       </div>
+    ) : compact ? (
+      <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
+        <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
+          <button type="button" className="hist-date" onClick={() => openExercise(e.exercise, e.date, false)} aria-label={`Open ${e.exercise} through ${fmtDate(e.date)}`}>{fmtDate(e.date)}</button>
+          <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+        </div>
+      </SwipeRow>
     ) : (
       <div key={e.id} className={compact ? "hist-item" : "today-item"} style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
         {compact
@@ -1859,7 +2160,28 @@ export default function Home() {
       ) : (
         <>
         {/* ---------------- OVERALL ---------------- */}
-        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen">
+        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove}>
+          <button type="button" className={"pull-cue" + (carouselOpen ? " open" : "")} onClick={() => setCarouselOpen((v) => !v)} aria-label={carouselOpen ? "Hide exercises" : "Show exercises"}>
+            <svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
+          </button>
+          <div className={"carousel" + (carouselOpen ? " open" : "")} aria-hidden={!carouselOpen}
+            onTouchStart={(e) => { pull.current = null; e.currentTarget._y = e.touches[0].clientY; }}
+            onTouchMove={(e) => { if (e.touches[0].clientY - (e.currentTarget._y || 0) < -40) setCarouselOpen(false); }}>
+            <div className="carousel-row">
+              <button type="button" className="carousel-card all" tabIndex={carouselOpen ? 0 : -1} onClick={() => setCarouselOpen(false)}>
+                <span className="cc-name">All lifts</span>
+                <span className="cc-val">Index</span>
+                <span className="cc-pct" style={{ color: allLiftsYtd === null ? "var(--text-tertiary)" : allLiftsYtd >= 0 ? "var(--gain)" : "var(--loss)" }}>{allLiftsYtd === null ? "n/a" : `${allLiftsYtd >= 0 ? "▲" : "▼"} ${Math.abs(allLiftsYtd).toFixed(1)}%`}</span>
+              </button>
+              {carouselItems.map((it) => (
+                <button key={it.name} type="button" className="carousel-card" tabIndex={carouselOpen ? 0 : -1} onClick={() => openExercise(it.name, it.last, true)}>
+                  <span className="cc-name">{tickerOf(it.name)}</span>
+                  <span className="cc-val">{it.e1rm} e1RM</span>
+                  <span className="cc-pct" style={{ color: it.pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{it.pct >= 0 ? "▲" : "▼"} {Math.abs(it.pct).toFixed(1)}%</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="label-sm" style={{ textAlign: "center", marginBottom: 8 }}>Your Strength Over Time</div>
           <div className="portfolio-change">
             {!portfolioView ? <span className="cap">Not enough data yet</span> : (() => {
@@ -1890,7 +2212,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="pills" style={{ marginBottom: 8 }}>
+          <div className="pills range-tabs" style={{ marginBottom: 8 }}>
             {RANGE_PRESETS.map((r) => (
               <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}>{r.label}</button>
             ))}
@@ -1944,7 +2266,12 @@ export default function Home() {
             {calendarOpen && <CalendarPopup selectedDate={selectedDate} onSelect={setSelectedDate} onClose={() => setCalendarOpen(false)} />}
           </div>
 
-          <div className="card">
+          <div className="card card-tabbed">
+            {nextTarget && nextTarget !== swapTarget && (
+              <button className="next-tab" onClick={() => selectExercise(nextTarget)} aria-label={`Next exercise ${nextTarget}`}>
+                <span className="next-tab-text">Next: {nextTarget}</span><span aria-hidden="true">›</span>
+              </button>
+            )}
             <div className="ex-input-wrap">
               <input
                 className="ex-input"
@@ -1971,20 +2298,25 @@ export default function Home() {
                 </div>
               )}
             </div>
-            {(swapTarget || nextTarget) && (
+            {swapTarget && (
               <div className="nav-row">
-                {swapTarget && (
-                  <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
-                    <span style={{ fontSize: "var(--fs-sec)" }}>⇄</span> Switch to {swapTarget}
-                  </button>
-                )}
-                {nextTarget && nextTarget !== swapTarget && (
-                  <button className="swap-btn next-btn" onClick={() => selectExercise(nextTarget)} aria-label={`Next exercise ${nextTarget}`}>
-                    Next: {nextTarget} <span style={{ fontSize: "var(--fs-sec)" }}>›</span>
-                  </button>
-                )}
+                <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
+                  <span className="swap-icon">⇄</span><span className="swap-text">Switch to {swapTarget}</span>
+                </button>
               </div>
             )}
+
+            {recExercise && (() => {
+              const st = exStats(entriesByExerciseStrength[recExercise] || [], "0000-01-01", "9999-12-31");
+              if (!st) return null;
+              return (
+                <div className="st-grid st-mini">
+                  <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{st.e5rm}</div></div>
+                  <div className="st-cell"><div className="st-label">e1RM</div><div className="st-val">{st.e1rm}</div></div>
+                  <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{st.lastSet.weight} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
+                </div>
+              );
+            })()}
 
             {recExercise && (
               <div className="pills" style={{ marginBottom: 12 }}>
@@ -2086,6 +2418,7 @@ export default function Home() {
             <div className="card add-card">
               <div className="label-sm">New exercise</div>
               <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 8 }} />
+              <input value={newExerciseTicker} onChange={(e) => setNewExerciseTicker(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))} placeholder={`Ticker (optional, ${defaultTicker(newExerciseName) || "e.g. BENCH"})`} maxLength={5} autoCapitalize="characters" style={{ marginBottom: 8, fontFamily: "var(--font-num)", letterSpacing: ".06em" }} />
               <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 12 }} />
               <datalist id="machine-brands">{MACHINE_BRANDS.map((b) => <option key={b} value={b} />)}</datalist>
               <div className="label-sm" style={{ marginBottom: 4 }}>Which day(s)? Tick any that apply</div>
@@ -2270,6 +2603,106 @@ export default function Home() {
         </>
       )}
 
+      {undoDel && (
+        <div className="undo-toast" role="status">
+          <span>Set deleted</span>
+          <button type="button" onClick={undoDelete}>Undo</button>
+        </div>
+      )}
+
+      {xpage && xData && (
+        <div className="xpage" role="dialog" aria-label={xpage.exercise}>
+          <div className="xp-top">
+            <button type="button" className="xp-back" onClick={closeExercise} aria-label="Back"><svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L2 10l8 8" /></svg></button>
+            <div className="xp-title">{xpage.exercise}</div>
+          </div>
+          <div className="xp-scroll">
+            <div className="label-sm" style={{ textAlign: "center", marginBottom: 8 }}>{xpage.ytd ? "Year to date" : `Through ${fmtDateFull(xpage.date)}`}</div>
+            <div className="portfolio-change">
+              {!xData.series ? <span className="cap">Not enough data yet</span> : (() => {
+                const pct = xScrub ? xScrub.value : xData.series.pct;
+                const up = pct >= 0;
+                return (
+                  <>
+                    <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>
+                    <span className="index-meta"><span className="cap">{xScrub ? xScrub.label : xpage.ytd ? "YTD" : "Since first log"}</span></span>
+                    <span className="index-tag">Estimated 1RM · {xData.series.sessions} sessions</span>
+                  </>
+                );
+              })()}
+            </div>
+            <div className="chart-box xp-chart">
+              {xData.series
+                ? <PortfolioChart rows={xData.series.rows} maRows={null} color={xData.series.pct >= 0 ? "var(--gain)" : "var(--loss)"} onScrub={setXScrub} />
+                : <div className="empty">Log this exercise on a few different days to see a graph.</div>}
+            </div>
+            <div className="digest-card2" style={{ cursor: "default" }}>
+              <div className="insights-head"><span className="label-sm" style={{ marginBottom: 0 }}>Summary</span></div>
+              <div className="dg-text open">{xData.summary}</div>
+            </div>
+
+            {xStats && (() => {
+              const pct = xData.series ? xData.series.pct : null;
+              const ago = (d) => { const n = Math.round((new Date(todayISO() + "T00:00:00") - new Date(d + "T00:00:00")) / 86400000); return n <= 0 ? "Today" : n === 1 ? "Yesterday" : `${n}d ago`; };
+              const cell = (label, value, color) => (<div className="st-cell" key={label}><div className="st-label">{label}</div><div className="st-val" style={color ? { color } : null}>{value}</div></div>);
+              return (
+                <div className="stats-block">
+                  <div className="st-grid">
+                    {cell("e1RM", xStats.e1rm)}
+                    {cell("e5RM", xStats.e5rm)}
+                    {cell(xpage.ytd ? "YTD" : "Change", pct === null ? "n/a" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`, pct === null ? null : pct >= 0 ? "var(--gain)" : "var(--loss)")}
+                    {cell("Volume", fmtNum(xStats.volume))}
+                    {cell("Sessions", xStats.sessions)}
+                    {cell("Sets / Reps", `${xStats.sets} / ${fmtNum(xStats.reps)}`)}
+                    {cell("PR", `${xStats.prWeight}`)}
+                    {cell("Avg wt / rep", xStats.avgPerRep || "n/a")}
+                    {cell("Last session", ago(xStats.lastDate))}
+                  </div>
+                  <div className="st-head">All time</div>
+                  <div className="st-grid">
+                    {cell("Volume", fmtNum(xStats.allVolume))}
+                    {cell("Sessions", xStats.allSessions)}
+                    {cell("First logged", fmtDate(xStats.firstDate))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="card card-tabbed" style={{ marginTop: 24 }}>
+              <button type="button" className="next-tab" onClick={() => setXEdit((v) => !v)}>
+                <span className="next-tab-text">{xEdit ? "Done" : "Edit"}</span>{!xEdit && <span aria-hidden="true">›</span>}
+              </button>
+              <div className="label-sm">Sets on {fmtDateFull(xpage.date)}</div>
+              {xData.dayEntries.length === 0 ? <div className="empty" style={{ padding: "8px 0" }}>Nothing logged on this day.</div> : (
+                <div className="today-list">
+                  {xData.dayEntries.map((e) => (xEdit || editingId === e.id
+                    ? renderEditableRow(e, false)
+                    : (
+                      <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
+                        <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                      </div>
+                    )))}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="label-sm">All sessions · {xData.list.length}</div>
+              <div className="hist-list">
+                {xData.list.map((e) => (editingId === e.id ? renderEditableRow(e, true) : (
+                  <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
+                    <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
+                      <button type="button" className={"hist-date" + (e.date === xpage.date ? " on" : "")} onClick={() => { setXpage({ ...xpage, date: e.date, ytd: false }); setXScrub(null); }}>{fmtDate(e.date)}</button>
+                      <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                    </div>
+                  </SwipeRow>
+                )))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {settingsOpen && (
         <>
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
@@ -2293,6 +2726,25 @@ export default function Home() {
               <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex color" />
               <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
               <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
+            </div>
+
+            <div className="label-sm" style={{ marginTop: 16 }}>Fonts</div>
+            <div className="select-wrap" style={{ marginBottom: 8 }}>
+              <select className="scope" value={settings.fontText} onChange={(e) => updateSettings({ fontText: e.target.value })} aria-label="Text font">
+                {TEXT_FONTS.map(([k, n]) => <option key={k} value={k}>Text: {n}</option>)}
+              </select>
+            </div>
+            <div className="select-wrap">
+              <select className="scope" value={settings.fontNum} onChange={(e) => updateSettings({ fontNum: e.target.value })} aria-label="Numbers and labels font">
+                {NUM_FONTS.map(([k, n]) => <option key={k} value={k}>Numbers and labels: {n}</option>)}
+              </select>
+            </div>
+
+            <div className="label-sm" style={{ marginTop: 16 }}>Tab bar</div>
+            <div className="pills">
+              {[[false, "Solid"], [true, "Glass"]].map(([k, label]) => (
+                <button key={label} className={"pill" + (!!settings.glass === k ? " active" : "")} onClick={() => updateSettings({ glass: k })}>{label}</button>
+              ))}
             </div>
 
             <div className="label-sm" style={{ marginTop: 16 }}>Lifter's Digest</div>
@@ -2375,7 +2827,8 @@ export default function Home() {
         </div>
       )}
 
-      <div className="bottom-nav" ref={navRef}>
+      <div className="bottom-nav" ref={navRef} style={{ "--i": activeSection === "charts" ? 0 : activeSection === "home" ? 2 : 1 }}>
+        <span className="nav-lens" aria-hidden="true" />
 
         <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
           <IconChart color="currentColor" /><span>Progress</span>
