@@ -342,9 +342,10 @@ function DotNum({ text, color, pitch = 6, intro = false, label }) {
 
 // The app title, pulled down from the top of Overall. Anchored to the bottom, so a small pull shows the
 // bottom of the letters and a full pull shows all of them.
-function DotTitle({ text, height, dragging }) {
+function DotTitle({ text, height, dragging, progress = 1 }) {
   const ref = useRef(null);
   const wrapRef = useRef(null);
+  const shown = useRef(0);
   const draw = () => {
     const cv = ref.current, wr = wrapRef.current;
     if (!cv || !wr) return;
@@ -356,15 +357,35 @@ function DotTitle({ text, height, dragging }) {
     const ctx = cv.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = cssColor("var(--text-primary)");
+    const p = shown.current;
     let cx = 0;
     text.split("").forEach((ch, i) => {
       if (i) cx += 1;
       const g = dotGlyph(ch);
-      g.forEach((row, ry) => row.split("").forEach((b, rx) => { if (b === "1") { ctx.beginPath(); ctx.arc((cx + rx) * pitch + pitch / 2, ry * pitch + pitch / 2, pitch * 0.46, 0, Math.PI * 2); ctx.fill(); } }));
+      g.forEach((row, ry) => row.split("").forEach((b, rx) => {
+        if (b !== "1") return;
+        const gx = cx + rx, hsh = (((gx * 73856093) ^ (ry * 19349663)) >>> 0) % 1000 / 1000;
+        if (hsh >= p) return;
+        ctx.beginPath(); ctx.arc(gx * pitch + pitch / 2, ry * pitch + pitch / 2, pitch * 0.46, 0, Math.PI * 2); ctx.fill();
+      }));
       cx += g[0].length;
     });
   };
-  useEffect(draw);
+  // Dots light up in a scattered order as the pull deepens; on release they fade back out quickly.
+  useEffect(() => {
+    let raf = 0;
+    const step = () => {
+      const target = Math.max(0, Math.min(1, progress));
+      if (dragging || target > shown.current) shown.current = target;
+      else shown.current += (target - shown.current) * 0.3;
+      if (Math.abs(shown.current - target) < 0.01) shown.current = target;
+      draw();
+      if (shown.current !== target) raf = requestAnimationFrame(step);
+    };
+    step();
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progress, dragging]);
   return (
     <div ref={wrapRef} className={"title-reveal" + (dragging ? " dragging" : "")} style={{ height }} aria-hidden="true">
       <canvas ref={ref} />
@@ -402,26 +423,23 @@ function typeIn(root, { delay = 280, duration = 620 } = {}) {
   requestAnimationFrame(frame);
 }
 
-// A small (i) that shows or hides the description under a card title.
-function WarmInfo() {
+// A static (i) in the lower left corner of a card. Tap it to show or hide the description beside it.
+function InfoFoot({ title, info }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="warm-info">
-      <button type="button" className="info-dot" aria-label="About warm-up sets" aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
-      {open && <div className="helper">Warm-up sets don't count toward recommendations or your top set</div>}
+    <div className="info-foot">
+      <button type="button" className="info-dot" aria-label={`About ${title}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
+      {open && <div className="axis-caption info-body">{info}</div>}
     </div>
   );
 }
 
-function CardHead({ title, info, children }) {
-  const [open, setOpen] = useState(false);
+function CardHead({ title, children }) {
   return (
     <div className="card-head">
       <div className="card-head-row">
         <div className="label-sm" style={{ textAlign: "center", marginBottom: 0 }}>{title}</div>
-        {info && <button type="button" className="info-dot" aria-label={`About ${title}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>}
       </div>
-      {info && open && <div className="axis-caption info-body">{info}</div>}
       {children}
     </div>
   );
@@ -1151,7 +1169,7 @@ function RadarChart({ data, rangeLabel, onTap }) {
   );
 }
 
-function VolumeBarChart({ weeks, onTapBar }) {
+function VolumeBarChart({ weeks, onTapBar, dots }) {
   const W = 340, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
   const max = Math.max(...weeks.map((w) => w.volume), 1);
   const n = weeks.length;
@@ -1167,7 +1185,9 @@ function VolumeBarChart({ weeks, onTapBar }) {
         const x = padL + i * ((W - padL - padR) / n) + 3;
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
-          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />
+          {dots
+            ? (() => { const pt = 6.4, nc = Math.max(1, Math.floor(bw / pt)), nr = Math.floor(h / pt), x0 = x + (bw - nc * pt) / 2 + pt / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r="2.4" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />); if (!nr) out.push(<circle key="z" cx={x + bw / 2} cy={H - padB - 2} r="1.8" fill="var(--border)" />); return out; })()
+            : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-secondary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
@@ -1175,7 +1195,7 @@ function VolumeBarChart({ weeks, onTapBar }) {
   );
 }
 
-function ConsistencyHeatmap({ weeks, onTap }) {
+function ConsistencyHeatmap({ weeks, onTap, dots }) {
   // weeks: [[{date, count, future}, ...7 days Monday to Sunday], ...]
   const cell = 20, gap = 4;
   const W = weeks.length * (cell + gap);
@@ -1184,7 +1204,12 @@ function ConsistencyHeatmap({ weeks, onTap }) {
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
     <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
-      {weeks.map((week, wi) => week.map((day, di) => (
+      {dots ? weeks.map((week, wi) => week.map((day, di) => {
+        const cxx = wi * (cell + gap) + cell / 2, cyy = di * (cell + gap) + cell / 2;
+        if (day.future) return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r="2.2" fill="none" stroke="var(--border)" strokeWidth="1" />;
+        if (day.count === 0) return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r="2.4" fill="var(--border)" />;
+        return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r={day.count === 1 ? 5 : day.count === 2 ? 7.5 : 9.5} fill="var(--accent)" fillOpacity={opFor(day.count)} />;
+      })) : weeks.map((week, wi) => week.map((day, di) => (
         <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={day.future || day.count === 0 ? 1 : opFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
     </svg>
@@ -2320,7 +2345,7 @@ export default function Home() {
     const dy = y - pull.current;
     if (dy > 56) setCarouselOpen(true);
     // Keep pulling past the cards and the app title shows, bottom first.
-    const t = Math.min(TITLE_MAX, Math.max(0, (dy - 56) * 0.9));
+    const t = Math.min(TITLE_MAX, Math.max(0, (dy - 110) * 0.9));
     setTitleDrag(true);
     setTitlePull((cur) => (Math.abs(cur - t) > 1 ? t : cur));
   };
@@ -2413,7 +2438,7 @@ export default function Home() {
         <>
         {/* ---------------- OVERALL ---------------- */}
         <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd} onTouchCancel={onPullEnd}>
-          <DotTitle text={APP_TITLE} height={titlePull} dragging={titleDrag} />
+          <DotTitle text={APP_TITLE} height={titlePull} dragging={titleDrag} progress={titlePull / TITLE_MAX} />
           <button type="button" className={"pull-cue" + (carouselOpen ? " open" : "")} onClick={() => setCarouselOpen((v) => !v)} aria-label={carouselOpen ? "Hide exercises" : "Show exercises"}>
             <svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
           </button>
@@ -2651,8 +2676,8 @@ export default function Home() {
             </div>
             <div className="warm-row">
               <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
-              <WarmInfo />
             </div>
+            <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" />
           </div>
 
           {todaysEntries.length > 0 && (
@@ -2783,26 +2808,29 @@ export default function Home() {
 
           <div className="label-sm" style={{ margin: "24px 0 12px" }}>Training overview</div>
           <div className="card">
-            <CardHead title="Strength growth by category" info="Average % change in estimated 1RM per workout, all-time. Tap the chart for the exact span. Hollow points mean not enough data yet." />
+            <CardHead title="Strength growth by category" />
             <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
             {radarInfoOpen && allTimeRange && (
               <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
               </div>
             )}
+            <InfoFoot title="Strength growth by category" info="Average % change in estimated 1RM per workout, all-time. Tap the chart for the exact span. Hollow points mean not enough data yet." />
           </div>
           <div className="card">
-            <CardHead title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. This week is highlighted." />
-            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => {}} />
+            <CardHead title="Weekly training volume" />
+            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => {}} dots={settings.dotNums !== false} />
+            <InfoFoot title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. This week is highlighted." />
           </div>
           <div className="card">
-            <CardHead title="Training consistency" info="Each column is a week (Monday to Sunday). Brighter means more sets logged that day. Tap the chart for the span." />
-            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
+            <CardHead title="Training consistency" />
+            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} dots={settings.dotNums !== false} />
             {heatmapInfoOpen && heatmapWeeks.length > 0 && (
               <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
               </div>
             )}
+            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). Bigger, brighter dots mean more sets logged that day. Tap the chart for the span." />
           </div>
         </div>
 
