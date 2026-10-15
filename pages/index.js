@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import { deriveTheme, deriveFonts } from "../lib/theme";
+import { filterFeed, FEED_MODES } from "../lib/feedFilter";
+import { mockSocial } from "../lib/mockSocial";
 import { unlockAudio, playClick, playWoodTriple, playBell, vibrate, VIBE } from "../lib/fx";
 
 const LINE_COLORS = ["#ff6600", "#00d4ff", "#ffb000", "#ff3b3b", "#7CFC00", "#c792ea", "#ff6ec7", "#5ee6d0", "#a0d911", "#9a8c98"];
@@ -441,6 +443,52 @@ function CardHead({ title, children }) {
         <div className="label-sm" style={{ textAlign: "center", marginBottom: 0 }}>{title}</div>
       </div>
       {children}
+    </div>
+  );
+}
+
+// ---- Social feed ----------------------------------------------------------------------------------
+// The filtering rules live in lib/feedFilter.js and the data comes from a source object. Today that is
+// lib/mockSocial.js (invented sample people, labelled "Sample"); swap in real account and social-graph data later.
+function PersonIcon({ x, r = 3.2 }) {
+  return <g><circle cx={x} cy="8" r={r} /><path d={`M${x - 5} 19 a5 5 0 0 1 10 0`} /></g>;
+}
+const FEED_ICONS = {
+  friends: <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><PersonIcon x={8} /><PersonIcon x={16} /></svg>,
+  fof: <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><PersonIcon x={5} r={2.6} /><PersonIcon x={12} r={2.6} /><PersonIcon x={19} r={2.6} /></svg>,
+};
+const FEED_MODE_LABEL = { friends: "Friends only", fof: "Friends of friends" };
+const DEGREE_LABEL = (it) => (it.source === "recommendation" ? "Suggested" : it.degree === 1 ? "Friend" : it.degree === 2 ? "Friend of friend" : "3rd degree");
+function agoText(ts) {
+  const h = Math.max(1, Math.round((Date.now() - ts) / 3600000));
+  return h < 24 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
+function FeedCard({ source = mockSocial }) {
+  const [mode, setMode] = useState(FEED_MODES.DISCOVERY); // null = Community Discovery (default)
+  const toggle = (m) => setMode((cur) => (cur === m ? FEED_MODES.DISCOVERY : m));
+  const items = useMemo(() => filterFeed({ ...source, mode }), [source, mode]);
+  const heading = mode === "friends" ? "Friends" : mode === "fof" ? "Friends of friends" : "Community";
+  return (
+    <div className="feed-card" data-notype>
+      <div className="insights-head">
+        <span className="label-sm" style={{ marginBottom: 0 }}>Feed · {heading}<span className="ai-tag">Sample</span></span>
+        <span className="feed-toggles" role="group" aria-label="Feed audience">
+          {["friends", "fof"].map((m) => (
+            <button key={m} type="button" className={"feed-toggle" + (mode === m ? " on" : "")} aria-pressed={mode === m} aria-label={FEED_MODE_LABEL[m]} onClick={() => toggle(m)}>{FEED_ICONS[m]}</button>
+          ))}
+        </span>
+      </div>
+      {items.length === 0 ? <div className="cap" style={{ padding: "var(--s-3) 0" }}>Nothing to show in this view yet.</div> : items.map((it) => {
+        const u = source.users[it.authorId] || {};
+        return (
+          <div key={it.id} className="feed-row">
+            <div className="feed-top"><span className="feed-name">{u.name || "Someone"}</span>{u.isMock && <span className="feed-mock">sample</span>}<span className="feed-meta">{DEGREE_LABEL(it)} · {agoText(it.ts)}</span></div>
+            <div className="feed-text"><span className="feed-ach">{it.achievement}</span> {it.text}</div>
+          </div>
+        );
+      })}
+      <div className="cap" style={{ marginTop: "var(--s-2)" }}>Sample data. Real friends arrive with accounts.</div>
     </div>
   );
 }
@@ -1178,7 +1226,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
       {[0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + (1 - t) * (H - padT - padB);
-        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--text-secondary)">{Math.round((max * t) / 1000)}k</text></g>;
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--text-primary)">{Math.round((max * t) / 1000)}k</text></g>;
       })}
       {weeks.map((w, i) => {
         const h = (w.volume / max) * (H - padT - padB);
@@ -1188,7 +1236,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
           {dots
             ? (() => { const pt = 6.4, nc = Math.max(1, Math.floor(bw / pt)), nr = Math.floor(h / pt), x0 = x + (bw - nc * pt) / 2 + pt / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r="2.4" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />); if (!nr) out.push(<circle key="z" cx={x + bw / 2} cy={H - padB - 2} r="1.8" fill="var(--border)" />); return out; })()
             : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
-          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-secondary)" textAnchor="middle">{w.label}</text>
+          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
     </svg>
@@ -1205,10 +1253,14 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
   return (
     <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
       {dots ? weeks.map((week, wi) => week.map((day, di) => {
-        const cxx = wi * (cell + gap) + cell / 2, cyy = di * (cell + gap) + cell / 2;
-        if (day.future) return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r="2.2" fill="none" stroke="var(--border)" strokeWidth="1" />;
-        if (day.count === 0) return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r="2.4" fill="var(--border)" />;
-        return <circle key={`${wi}-${di}`} cx={cxx} cy={cyy} r={day.count === 1 ? 5 : day.count === 2 ? 7.5 : 9.5} fill="var(--accent)" fillOpacity={opFor(day.count)} />;
+        // Each day is a small square made of a 3 x 3 grid of the same tiny dots the volume bars use.
+        const pt = 6.4, x0 = wi * (cell + gap) + (cell - 2 * pt) / 2, y0 = di * (cell + gap) + (cell - 2 * pt) / 2, out = [];
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+          out.push(day.future
+            ? <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="1.2" fill="var(--border)" />
+            : <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="2.4" fill={day.count === 0 ? "var(--border)" : "var(--accent)"} fillOpacity={day.count === 0 ? 1 : opFor(day.count)} />);
+        }
+        return <g key={`${wi}-${di}`}>{out}</g>;
       })) : weeks.map((week, wi) => week.map((day, di) => (
         <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={day.future || day.count === 0 ? 1 : opFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
@@ -2533,6 +2585,8 @@ export default function Home() {
             </div>
           </div>
 
+          <FeedCard />
+
         </div>
 
         {/* ---------------- WORKOUT (search, today's target, log) ---------------- */}
@@ -2751,12 +2805,12 @@ export default function Home() {
               </div>
             );
           })()}
-          <div className="pills">
-            {RANGE_PRESETS.map((r) => <button key={r.key} className={"pill" + (r.key === chartRange ? " active" : "")} onClick={() => setChartRange(r.key)}>{r.label}</button>)}
+          <div className="pills range-tabs" style={{ marginBottom: 0 }}>
+            {RANGE_PRESETS.map((r) => <button key={r.key} className={"pill" + (r.key === chartRange ? " active" : "")} onClick={() => setChartRange(r.key)}><span className="tab-l">{r.label}</span></button>)}
           </div>
-          <div className="pills">
-            <button className={"pill" + (chartMetric === "weight" ? " active" : "")} onClick={() => setChartMetric("weight")}>Top Weight</button>
-            <button className={"pill" + (chartMetric === "e1rm" ? " active" : "")} onClick={() => setChartMetric("e1rm")}>Est. 1RM</button>
+          <div className="pills pills-sub">
+            <button className={"pill pill-sm" + (chartMetric === "weight" ? " active" : "")} onClick={() => setChartMetric("weight")}><span className="tab-l">Top Weight</span></button>
+            <button className={"pill pill-sm" + (chartMetric === "e1rm" ? " active" : "")} onClick={() => setChartMetric("e1rm")}><span className="tab-l">Est. 1RM</span></button>
           </div>
           {chartResult.rows.length === 0 ? (
             <div className="empty">{chartFocusExercise ? "No sets logged in this range yet." : "Pick an exercise to see its progress."}</div>
