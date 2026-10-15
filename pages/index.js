@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import { deriveTheme, deriveFonts } from "../lib/theme";
 import { unlockAudio, playClick, playWoodTriple, playBell, vibrate, VIBE } from "../lib/fx";
 
@@ -165,18 +165,20 @@ function buildExSeries(list, fromISO, toISOd) {
 }
 
 // A plain-English read on one exercise, built only from the logged numbers.
-function exSummary(name, series, list, ytd) {
+function exSummary(name, series, list, ytd, W = (v) => v) {
   if (!series) return `Not enough sessions of ${name} in this range yet. Log it a couple more times and a trend shows up here.`;
   const per = ytd ? "this year" : "in this range";
   const parts = [`${series.sessions} sessions ${per}.`];
-  parts.push(`Best set went from ${series.first.weight} x ${series.first.reps} to ${series.latest.weight} x ${series.latest.reps}, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}% in estimated 1RM.`);
+  parts.push(`Best set went from ${W(series.first.weight)} x ${series.first.reps} to ${W(series.latest.weight)} x ${series.latest.reps}, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}% in estimated 1RM.`);
   if (series.e1rmNow >= series.e1rmBest) parts.push("The latest session is your best in this range.");
-  else parts.push(`Your best estimated 1RM in this range was ${series.e1rmBest}, so you are ${Math.round(((series.e1rmBest - series.e1rmNow) / series.e1rmBest) * 100)}% under it.`);
+  else parts.push(`Your best estimated 1RM in this range was ${W(series.e1rmBest)}, so you are ${Math.round(((series.e1rmBest - series.e1rmNow) / series.e1rmBest) * 100)}% under it.`);
   if (plateauFlag(list.filter((e) => !e.isWarmup))) parts.push("It has held steady for the last 3 sessions.");
   return parts.join(" ");
 }
 
 
+const KG_PER_LB = 0.45359237;
+const r1 = (n) => Math.round(n * 10) / 10;
 const estE5RM = (weight, reps) => Math.round(estE1RM(weight, reps) / (1 + 5 / 30));
 const fmtNum = (n) => Math.round(n).toLocaleString("en-US");
 const defaultTicker = (name) => {
@@ -265,7 +267,167 @@ function SwipeRow({ onEdit, onDelete, children }) {
   );
 }
 
-function SvgChart({ rows, series, mode, metric }) {
+
+// ---- Dot-matrix numbers and title. A 5 x 7 bitmap font drawn as real dots on a canvas. ----
+const APP_TITLE = "CAPITALGAINS";
+const DOT_FONT = {
+  "0": ["01110","10001","10011","10101","11001","10001","01110"], "1": ["00100","01100","00100","00100","00100","00100","01110"],
+  "2": ["01110","10001","00001","00010","00100","01000","11111"], "3": ["11110","00001","00001","01110","00001","00001","11110"],
+  "4": ["00010","00110","01010","10010","11111","00010","00010"], "5": ["11111","10000","11110","00001","00001","10001","01110"],
+  "6": ["00110","01000","10000","11110","10001","10001","01110"], "7": ["11111","00001","00010","00100","01000","01000","01000"],
+  "8": ["01110","10001","10001","01110","10001","10001","01110"], "9": ["01110","10001","10001","01111","00001","00010","01100"],
+  "+": ["00000","00100","00100","11111","00100","00100","00000"], "-": ["00000","00000","00000","11111","00000","00000","00000"],
+  ".": ["00","00","00","00","00","11","11"], "%": ["11001","11010","00010","00100","01000","01011","10011"], " ": ["000","000","000","000","000","000","000"],
+  "A": ["01110","10001","10001","11111","10001","10001","10001"], "B": ["11110","10001","10001","11110","10001","10001","11110"],
+  "C": ["01110","10001","10000","10000","10000","10001","01110"], "D": ["11110","10001","10001","10001","10001","10001","11110"],
+  "E": ["11111","10000","10000","11110","10000","10000","11111"], "F": ["11111","10000","10000","11110","10000","10000","10000"],
+  "G": ["01110","10001","10000","10111","10001","10001","01111"], "H": ["10001","10001","10001","11111","10001","10001","10001"],
+  "I": ["01110","00100","00100","00100","00100","00100","01110"], "J": ["00111","00010","00010","00010","00010","10010","01100"],
+  "K": ["10001","10010","10100","11000","10100","10010","10001"], "L": ["10000","10000","10000","10000","10000","10000","11111"],
+  "M": ["10001","11011","10101","10101","10001","10001","10001"], "N": ["10001","11001","10101","10011","10001","10001","10001"],
+  "O": ["01110","10001","10001","10001","10001","10001","01110"], "P": ["11110","10001","10001","11110","10000","10000","10000"],
+  "Q": ["01110","10001","10001","10001","10101","10010","01101"], "R": ["11110","10001","10001","11110","10100","10010","10001"],
+  "S": ["01111","10000","10000","01110","00001","00001","11110"], "T": ["11111","00100","00100","00100","00100","00100","00100"],
+  "U": ["10001","10001","10001","10001","10001","10001","01110"], "V": ["10001","10001","10001","10001","10001","01010","00100"],
+  "W": ["10001","10001","10001","10101","10101","10101","01010"], "X": ["10001","10001","01010","00100","01010","10001","10001"],
+  "Y": ["10001","10001","01010","00100","00100","00100","00100"], "Z": ["11111","00001","00010","00100","01000","10000","11111"],
+};
+const dotGlyph = (ch) => DOT_FONT[ch === "−" ? "-" : ch] || DOT_FONT[" "];
+const dotCols = (text) => { let c = 0; String(text).split("").forEach((ch, i) => { c += dotGlyph(ch)[0].length + (i ? 1 : 0); }); return c; };
+const cssColor = (c) => {
+  const m = /^var\((--[a-z-]+)\)$/.exec(c || "");
+  return m && typeof document !== "undefined" ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || "#fff" : c;
+};
+// Lights the dots left to right when `intro` is set (the one-time start-up animation).
+function DotNum({ text, color, pitch = 6, intro = false, label }) {
+  const ref = useRef(null);
+  const prog = useRef(intro ? 0 : 1);
+  const [, force] = useState(0);
+  const cols = dotCols(text);
+  const draw = () => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1, W = cols * pitch, H = 7 * pitch;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const col = cssColor(color);
+    let cx = 0;
+    String(text).split("").forEach((ch, i) => {
+      if (i) cx += 1;
+      const g = dotGlyph(ch);
+      g.forEach((row, ry) => row.split("").forEach((b, rx) => {
+        const colIdx = cx + rx, on = b === "1";
+        const lit = on && colIdx / cols <= prog.current;
+        ctx.globalAlpha = lit ? 1 : on ? 0.1 : 0.06;
+        ctx.fillStyle = lit ? col : "#888";
+        ctx.beginPath(); ctx.arc(colIdx * pitch + pitch / 2, ry * pitch + pitch / 2, pitch * (lit ? 0.42 : 0.28), 0, Math.PI * 2); ctx.fill();
+      }));
+      cx += g[0].length;
+    });
+    ctx.globalAlpha = 1;
+  };
+  useEffect(() => {
+    if (!intro) return undefined;
+    let raf = 0; const t0 = performance.now() + 300;
+    const step = (now) => { prog.current = Math.min(1, Math.max(0, (now - t0) / 380)); draw(); if (prog.current < 1) raf = requestAnimationFrame(step); else force((x) => x + 1); };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(draw);
+  return <canvas ref={ref} className="dotnum" role="img" aria-label={label || String(text)} style={{ width: cols * pitch, height: 7 * pitch }} />;
+}
+
+// The app title, pulled down from the top of Overall. Anchored to the bottom, so a small pull shows the
+// bottom of the letters and a full pull shows all of them.
+function DotTitle({ text, height, dragging }) {
+  const ref = useRef(null);
+  const wrapRef = useRef(null);
+  const draw = () => {
+    const cv = ref.current, wr = wrapRef.current;
+    if (!cv || !wr) return;
+    const cols = dotCols(text), avail = Math.max(120, wr.clientWidth);
+    const pitch = Math.min(5.6, avail / cols);
+    const dpr = window.devicePixelRatio || 1, W = Math.round(cols * pitch), H = Math.round(7 * pitch);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    cv.style.width = `${W}px`; cv.style.height = `${H}px`;
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = cssColor("var(--text-primary)");
+    let cx = 0;
+    text.split("").forEach((ch, i) => {
+      if (i) cx += 1;
+      const g = dotGlyph(ch);
+      g.forEach((row, ry) => row.split("").forEach((b, rx) => { if (b === "1") { ctx.beginPath(); ctx.arc((cx + rx) * pitch + pitch / 2, ry * pitch + pitch / 2, pitch * 0.46, 0, Math.PI * 2); ctx.fill(); } }));
+      cx += g[0].length;
+    });
+  };
+  useEffect(draw);
+  return (
+    <div ref={wrapRef} className={"title-reveal" + (dragging ? " dragging" : "")} style={{ height }} aria-hidden="true">
+      <canvas ref={ref} />
+    </div>
+  );
+}
+
+// One-time start-up effect: characters of everything under `root` appear one by one, like text being typed
+// on an old terminal. Uses the CSS Custom Highlight API, so no markup is touched and nothing moves.
+let introPlayed = false;
+function typeIn(root, { delay = 280, duration = 620 } = {}) {
+  if (typeof window === "undefined" || !root || !window.CSS || !CSS.highlights || typeof Highlight === "undefined") return;
+  const nodes = [];
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.nodeValue.trim() && !n.parentElement.closest("svg,canvas,.carousel,script,style,[data-notype]") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+  });
+  while (w.nextNode()) nodes.push(w.currentNode);
+  const lens = nodes.map((n) => n.nodeValue.length), total = lens.reduce((a, b) => a + b, 0);
+  if (!total) return;
+  const start = performance.now() + delay;
+  const frame = (now) => {
+    const p = Math.min(1, Math.max(0, (now - start) / duration)), count = Math.floor(p * total);
+    if (p >= 1) { CSS.highlights.delete("typein"); return; }
+    const ranges = []; let cum = 0;
+    nodes.forEach((n, i) => {
+      const len = Math.min(lens[i], n.nodeValue.length), from = Math.max(0, count - cum);
+      if (from < len) { try { const r = new Range(); r.setStart(n, from); r.setEnd(n, len); ranges.push(r); } catch (e) { /* node changed */ } }
+      cum += lens[i];
+    });
+    CSS.highlights.set("typein", new Highlight(...ranges));
+    requestAnimationFrame(frame);
+  };
+  const first = []; nodes.forEach((n) => { try { const r = new Range(); r.setStart(n, 0); r.setEnd(n, n.nodeValue.length); first.push(r); } catch (e) { /* ignore */ } });
+  CSS.highlights.set("typein", new Highlight(...first));
+  requestAnimationFrame(frame);
+}
+
+// A small (i) that shows or hides the description under a card title.
+function WarmInfo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="warm-info">
+      <button type="button" className="info-dot" aria-label="About warm-up sets" aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
+      {open && <div className="helper">Warm-up sets don't count toward recommendations or your top set</div>}
+    </div>
+  );
+}
+
+function CardHead({ title, info, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card-head">
+      <div className="card-head-row">
+        <div className="label-sm" style={{ textAlign: "center", marginBottom: 0 }}>{title}</div>
+        {info && <button type="button" className="info-dot" aria-label={`About ${title}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>}
+      </div>
+      {info && open && <div className="axis-caption info-body">{info}</div>}
+      {children}
+    </div>
+  );
+}
+
+function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
   const [activeIdx, setActiveIdx] = useState(null);
   const svgRef = useRef(null);
   const W = 340, H = 210, padL = 34, padR = 14, padT = 10, padB = 24;
@@ -299,8 +461,8 @@ function SvgChart({ rows, series, mode, metric }) {
         const colorIdx = series.indexOf(s);
         const detail = mode === "workout" ? (activeRow[`${s}__detail`] || []) : null;
         const suffix = mode === "exercise"
-          ? `${activeRow[s]}${metric === "e1rm" ? " e1RM" : " lbs"}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
-          : `${activeRow[s]}${metric === "e1rm" ? " e1RM" : " lbs"}`;
+          ? `${activeRow[s]}${metric === "e1rm" ? " e1RM" : ` ${unit}`}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
+          : `${activeRow[s]}${metric === "e1rm" ? " e1RM" : ` ${unit}`}`;
         return { series: s, color: LINE_COLORS[colorIdx % LINE_COLORS.length], text: `${s}: ${suffix}`, detail };
       })
     : [];
@@ -608,7 +770,8 @@ const HONEY_COLORS = [
   "#ffb000", "#f5d90a", "#7ed957", "#1ecbe1", "#5b8cff", "#b26bff",
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false, gl: "ios" };
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false, gl: "ios", unit: "lbs", dotNums: true };
 const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
 const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
@@ -624,7 +787,8 @@ const GOALS = [
 const DIGEST_WINDOW = 30;
 const hashStr = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 
-function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exercises, due, goal }) {
+function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exercises, due, goal, unit = "lbs" }) {
+  const cw = (w) => (unit === "kg" ? r1(w * KG_PER_LB) : w);
   const curStart = shiftDate(todayIso, -(DIGEST_WINDOW - 1));
   const prevStart = shiftDate(todayIso, -(2 * DIGEST_WINDOW - 1));
   const prevEnd = shiftDate(curStart, -1);
@@ -644,15 +808,15 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
     const ec = estE1RM(bc.weight, bc.reps), ep = estE1RM(bp.weight, bp.reps);
     const wc = topW(cur), wp = topW(prev);
     const drivers = [];
-    if (wc !== wp) drivers.push(`top weight ${wc > wp ? "up" : "down"} from ${wp} to ${wc} lbs`);
+    if (wc !== wp) drivers.push(`top weight ${wc > wp ? "up" : "down"} from ${cw(wp)} to ${cw(wc)} ${unit}`);
     const prevAtW = prev.filter((e) => e.weight === wc);
     if (prevAtW.length) {
       const rc = Math.max(...cur.filter((e) => e.weight === wc).map((e) => e.reps)), rp = Math.max(...prevAtW.map((e) => e.reps));
-      if (rc !== rp) drivers.push(`best reps at ${wc} lbs ${rc > rp ? "up" : "down"} from ${rp} to ${rc}`);
+      if (rc !== rp) drivers.push(`best reps at ${cw(wc)} ${unit} ${rc > rp ? "up" : "down"} from ${rp} to ${rc}`);
     }
     if (sess(cur) !== sess(prev)) drivers.push(`${sess(cur)} sessions vs ${sess(prev)} in the prior 30 days`);
     if (setsOf(cur) !== setsOf(prev)) drivers.push(`about ${perWeek(setsOf(cur))} sets a week vs ${perWeek(setsOf(prev))}`);
-    lifts.push({ name, changePct: Math.round(((ec - ep) / ep) * 1000) / 10, bestNow: `${bc.weight} x ${bc.reps}`, bestBefore: `${bp.weight} x ${bp.reps}`, e1rmNow: ec, e1rmBefore: ep, drivers });
+    lifts.push({ name, changePct: Math.round(((ec - ep) / ep) * 1000) / 10, bestNow: `${cw(bc.weight)} x ${bc.reps}`, bestBefore: `${cw(bp.weight)} x ${bp.reps}`, e1rmNow: cw(ec), e1rmBefore: cw(ep), drivers });
   });
   const improving = lifts.filter((l) => l.changePct >= 2).sort((a, b) => b.changePct - a.changePct).slice(0, 3);
   const slipping = lifts.filter((l) => l.changePct <= -2).sort((a, b) => a.changePct - b.changePct).slice(0, 3);
@@ -677,7 +841,7 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
       if (!p.top || estE1RM(e.weight, e.reps) > estE1RM(p.top.weight, p.top.reps)) p.top = e;
     });
     const topSets = Object.entries(per)
-      .map(([exercise, p]) => ({ exercise, topSet: `${p.top.weight} x ${p.top.reps}`, sets: p.sets, score: estE1RM(p.top.weight, p.top.reps) }))
+      .map(([exercise, p]) => ({ exercise, topSet: `${cw(p.top.weight)} x ${p.top.reps}`, sets: p.sets, score: estE1RM(p.top.weight, p.top.reps) }))
       .sort((a, b) => b.score - a.score).slice(0, 6).map((t) => ({ exercise: t.exercise, topSet: t.topSet, sets: t.sets }));
     lastWorkout = { date: lastDate, daysAgo: daysBetween(lastDate, todayIso), day: dayName, topSets };
   }
@@ -690,11 +854,11 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
     if (!cur.length || !old.length) return;
     const bc = best(cur), bo = best(old);
     const ec = estE1RM(bc.weight, bc.reps), eo = estE1RM(bo.weight, bo.reps);
-    if (ec > eo) newPRs.push({ exercise: name, now: `${bc.weight} x ${bc.reps}`, before: `${bo.weight} x ${bo.reps}`, date: bc.date, gainPct: Math.round(((ec - eo) / eo) * 1000) / 10 });
+    if (ec > eo) newPRs.push({ exercise: name, now: `${cw(bc.weight)} x ${bc.reps}`, before: `${cw(bo.weight)} x ${bo.reps}`, date: bc.date, gainPct: Math.round(((ec - eo) / eo) * 1000) / 10 });
   });
   newPRs.sort((a, b) => b.gainPct - a.gainPct);
   const dueNext = due ? { day: due.day, daysSinceFullSession: Number.isFinite(due.days) ? due.days : null } : null;
-  return { windowDays: DIGEST_WINDOW, goal: goal || "", lastWorkout, newPRs: newPRs.slice(0, 3), dueNext, improving, slipping, stalled: stalled.filter((n) => !flagged.has(n)).slice(0, 3), overdue, trainingDaysNow: curSessions, trainingDaysBefore: prevSessions, liftsCompared: lifts.length };
+  return { windowDays: DIGEST_WINDOW, unit, goal: goal || "", lastWorkout, newPRs: newPRs.slice(0, 3), dueNext, improving, slipping, stalled: stalled.filter((n) => !flagged.has(n)).slice(0, 3), overdue, trainingDaysNow: curSessions, trainingDaysBefore: prevSessions, liftsCompared: lifts.length };
 }
 
 // Plain-English digest built straight from the stats. Used when AI is off, unavailable or fails.
@@ -760,8 +924,10 @@ function HoneyPicker({ value, onPick }) {
   );
 }
 
-function PortfolioChart({ rows, maRows, color, onScrub }) {
+function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
   const [activeIndex, setActiveIndex] = useState(null);
+  const introRef = useRef(intro);
+  const revealRef = useRef(intro ? 0 : 1);
   const svgRef = useRef(null);
   // Measure the real box so the line runs edge to edge with nothing letterboxed.
   const [box, setBox] = useState({ w: 340, h: 170 });
@@ -808,6 +974,13 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme"] });
     return () => mo.disconnect();
   }, []);
+  useEffect(() => {
+    if (!introRef.current) return undefined;
+    let raf = 0; const t0 = performance.now() + 230;
+    const step = (now) => { revealRef.current = Math.min(1, Math.max(0, (now - t0) / 420)); setThemeTick((t) => t + 1); if (revealRef.current < 1) raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const DOT_GAP = 3.2;
   const resolveColor = (c) => {
     const m = /^var\((--[a-z-]+)\)$/.exec(c || "");
@@ -838,6 +1011,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       const ly = lineYAt(gx);
       for (let gy = 1.6; gy < H; gy += DOT_GAP) {
         if (gy < ly) continue;
+        if (gy > revealRef.current * H) break; // start-up: the dots come in from the top, row by row
         const a = fadeAt(gy);
         if (a < 0.02) continue;
         ctx.globalAlpha = a;
@@ -921,7 +1095,7 @@ function PortfolioChart({ rows, maRows, color, onScrub }) {
       {maRuns.map((run, i) => (
         <polyline key={i} points={run.join(" ")} fill="none" stroke="var(--ma)" strokeWidth="1.5" strokeDasharray="1,3" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
       ))}
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      <polyline points={pts} pathLength="1" className={introRef.current ? "pf-line pf-line-intro" : "pf-line"} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {active && (
         <g>
           <line x1={active.x} y1={padT} x2={active.x} y2={H} stroke={color} strokeWidth="1" opacity="0.35" strokeDasharray="3,3" />
@@ -993,7 +1167,7 @@ function VolumeBarChart({ weeks, onTapBar }) {
         const x = padL + i * ((W - padL - padR) / n) + 3;
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
-          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill={w.isCurrent ? "#1d5f8a" : "var(--text-primary)"} />
+          <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-secondary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
@@ -1006,11 +1180,12 @@ function ConsistencyHeatmap({ weeks, onTap }) {
   const cell = 20, gap = 4;
   const W = weeks.length * (cell + gap);
   const H = 7 * (cell + gap);
-  const colorFor = (count) => (count === 0 ? "var(--border)" : count === 1 ? "#7a3a10" : count === 2 ? "#b5540f" : "var(--text-primary)");
+  const colorFor = () => "var(--accent)";
+  const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
     <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
       {weeks.map((week, wi) => week.map((day, di) => (
-        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : colorFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
+        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={day.future || day.count === 0 ? 1 : opFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
     </svg>
   );
@@ -1119,7 +1294,13 @@ export default function Home() {
   const [entries, setEntries] = useState([]);
   const [restDays, setRestDays] = useState([]);
   const [progressionMode, setProgressionMode] = useState("weight"); // "weight" | "reps"
+  const unit = settings.unit === "kg" ? "kg" : "lbs";
+  const W = (lbs) => (unit === "kg" ? r1(lbs * KG_PER_LB) : r1(lbs)); // pounds in, display number out
+  const Wrec = (lbs) => (unit === "kg" ? Math.round((lbs * KG_PER_LB) / 2.5) * 2.5 : lbs); // suggested weights land on plates
+  const toLbs = (v) => (unit === "kg" ? Math.round((Number(v) / KG_PER_LB) * 1000) / 1000 : Number(v));
+  const cvText = (str) => (unit === "kg" ? String(str).replace(/(\d+(?:\.\d+)?)\s*lbs?\b/g, (m, n) => `${Math.round(Number(n) * KG_PER_LB * 2) / 2} kg`) : str);
   const [tickers, setTickers] = useState({});
+  const [restTimes, setRestTimes] = useState({});
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
@@ -1182,7 +1363,7 @@ export default function Home() {
         nextEntries = nextEntries.map((e) => (e.workoutId === "legsB" ? { ...e, workoutId: "legsA" } : e));
         if (activeWorkoutId === "legsB") setActiveWorkoutId("legsA");
         // Save the merge immediately so it only ever needs to run once.
-        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode, tickers: data.tickers || {} });
+        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode, tickers: data.tickers || {}, restTimes: data.restTimes || {} });
       }
 
       setWorkouts(nextWorkouts);
@@ -1190,6 +1371,7 @@ export default function Home() {
       setEntries(nextEntries);
       setRestDays(nextRestDays);
       setTickers(data.tickers || {});
+      setRestTimes(data.restTimes || {});
       setProgressionMode(nextProgressionMode);
       setLoaded(true);
       setAuthError(null);
@@ -1225,7 +1407,7 @@ export default function Home() {
   useEffect(() => {
     try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) }); } catch (e) { /* ignore */ }
   }, []);
-  useEffect(() => {
+  useIsoLayoutEffect(() => {
     const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
     const apply = () => {
       const t = deriveTheme(settings.mode, settings.accent, mq ? mq.matches : false, settings.gl);
@@ -1235,13 +1417,14 @@ export default function Home() {
       const fv = deriveFonts(settings.fontText, settings.fontNum);
       Object.keys(fv).forEach((k) => root.style.setProperty(k, fv[k]));
       if (settings.glass) root.setAttribute("data-nav", "glass"); else root.removeAttribute("data-nav");
+      if (settings.dotNums !== false) root.setAttribute("data-dotnums", "on"); else root.removeAttribute("data-dotnums");
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute("content", t.themeColor);
     };
     apply();
     if (settings.mode === "system" && mq && mq.addEventListener) { mq.addEventListener("change", apply); return () => mq.removeEventListener("change", apply); }
     return undefined;
-  }, [settings.mode, settings.accent, settings.fontText, settings.fontNum, settings.glass]);
+  }, [settings.mode, settings.accent, settings.fontText, settings.fontNum, settings.glass, settings.gl, settings.dotNums]);
   const updateSettings = (patch) => setSettings((cur) => {
     const next = { ...cur, ...patch };
     try { localStorage.setItem("hooksSettings", JSON.stringify(next)); } catch (e) { /* ignore */ }
@@ -1286,8 +1469,10 @@ export default function Home() {
       restDays: next.restDays !== undefined ? next.restDays : restDays,
       progressionMode: next.progressionMode !== undefined ? next.progressionMode : progressionMode,
       tickers: next.tickers !== undefined ? next.tickers : tickers,
+      restTimes: next.restTimes !== undefined ? next.restTimes : restTimes,
     };
     setTickers(payload.tickers || {});
+    setRestTimes(payload.restTimes || {});
     setWorkouts(payload.workouts); setExercises(payload.exercises); setEntries(payload.entries); setRestDays(payload.restDays); setProgressionMode(payload.progressionMode);
     try {
       const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(payload) });
@@ -1430,7 +1615,7 @@ export default function Home() {
   const prefillFor = (name) => {
     const rec = buildRecommendation(name, 1, "", "");
     if (!rec || rec.noData) return { weight: "", sets: "", reps: "" };
-    return { weight: String(rec.nextTopWeight), sets: String(rec.defaultSets), reps: String(rec.repLow) };
+    return { weight: String(Wrec(rec.nextTopWeight)), sets: String(rec.defaultSets), reps: String(rec.repLow) };
   };
 
   const [recExercise, setRecExercise] = useState(null);
@@ -1439,8 +1624,8 @@ export default function Home() {
   // The plan always lays out at least 4 working sets; the Sets box only says how many you log per entry.
   const recSetCount = Math.min(8, Math.max(4, Number(form.sets) || 4));
   const recommendation = useMemo(
-    () => buildRecommendation(recExercise, recSetCount, manualWeight, manualReps),
-    [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode]
+    () => buildRecommendation(recExercise, recSetCount, manualWeight ? String(toLbs(manualWeight)) : "", manualReps),
+    [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode, unit]
   );
 
   // Picking an exercise (from the list, the search box or the swap button) stashes whatever is in
@@ -1465,7 +1650,7 @@ export default function Home() {
   const swapTarget = recentExercises.find((n) => n !== form.exercise.trim()) || null;
 
   const startRest = (name) => {
-    const total = restSecondsFor(name);
+    const total = (restTimes && restTimes[name]) || restSecondsFor(name);
     setRestTimer({ total, endsAt: Date.now() + total * 1000, exercise: name, done: false, warned: false });
   };
   useEffect(() => {
@@ -1488,7 +1673,21 @@ export default function Home() {
     }
     if (restRemaining <= -45) setRestTimer(null);
   }, [restRemaining]);
-  const nudgeRest = (secs) => setRestTimer((t) => (t ? { ...t, endsAt: t.endsAt + secs * 1000, total: Math.max(15, t.total + secs), done: false, warned: false } : t));
+  const changeUnit = (u) => {
+    if (u === unit) return;
+    const lbsNow = form.weight !== "" && !isNaN(Number(form.weight)) ? toLbs(form.weight) : null;
+    draftsRef.current = {};
+    setManualWeight(""); setEditingId(null);
+    updateSettings({ unit: u });
+    if (lbsNow !== null) setForm((f) => ({ ...f, weight: String(u === "kg" ? r1(lbsNow * KG_PER_LB) : r1(lbsNow)) }));
+  };
+  const nudgeRest = (secs) => {
+    if (!restTimer) return;
+    const total = Math.max(15, restTimer.total + secs);
+    setRestTimer((t) => (t ? { ...t, endsAt: t.endsAt + secs * 1000, total, done: false, warned: false } : t));
+    // Remember it: the next rest for this exercise starts at the length you settled on.
+    persist({ workouts, exercises, entries, restTimes: { ...restTimes, [restTimer.exercise]: total } });
+  };
 
   // ---- Logging -------------------------------------------------------------------------------------
   const submitSet = (nameOverride, skipDupCheck) => {
@@ -1504,7 +1703,7 @@ export default function Home() {
       if (similar) { setDupPrompt({ typed: exerciseName, existing: similar, kind: "log" }); return; }
     }
     const homeWorkoutId = findExerciseHome(exerciseName) || activeWorkoutId;
-    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: homeWorkoutId, exercise: exerciseName, weight: Number(form.weight), sets: form.sets ? Number(form.sets) : 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate, isWarmup: !!form.isWarmup };
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: homeWorkoutId, exercise: exerciseName, weight: toLbs(form.weight), sets: form.sets ? Number(form.sets) : 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate, isWarmup: !!form.isWarmup };
     const list = exercises[homeWorkoutId] || [];
     const nextExercises = list.some((e) => e.toLowerCase() === exerciseName.toLowerCase()) ? exercises : { ...exercises, [homeWorkoutId]: [...list, exerciseName] };
     persist({ workouts, exercises: nextExercises, entries: [entry, ...entries] });
@@ -1547,14 +1746,14 @@ export default function Home() {
   const [editingId, setEditingId] = useState(null);
   const [showTodaysLog, setShowTodaysLog] = useState(false);
   const [editForm, setEditForm] = useState({ weight: "", reps: "", sets: "" });
-  const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(entry.weight), reps: String(entry.reps), sets: String(entry.sets) }); };
+  const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(W(entry.weight)), reps: String(entry.reps), sets: String(entry.sets) }); };
   const cancelEdit = () => setEditingId(null);
   const saveEdit = (id) => {
     if (!editForm.weight) return;
     persist({
       workouts, exercises,
       entries: entries.map((e) => (e.id === id
-        ? { ...e, weight: Number(editForm.weight), reps: editForm.reps ? Number(editForm.reps) : 0, sets: editForm.sets ? Number(editForm.sets) : 1 }
+        ? { ...e, weight: toLbs(editForm.weight), reps: editForm.reps ? Number(editForm.reps) : 0, sets: editForm.sets ? Number(editForm.sets) : 1 }
         : e)),
     });
     setEditingId(null);
@@ -1696,6 +1895,8 @@ export default function Home() {
   const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
   const [activeSection, setActiveSection] = useState("portfolio");
   const [dockVisible, setDockVisible] = useState(false);
+  const dpRef = useRef(0);
+  const saveBtnRef = useRef(null);
   useEffect(() => {
     const onScroll = () => {
       const keys = Object.keys(sectionRefs.current);
@@ -1711,7 +1912,13 @@ export default function Home() {
       const home = sectionRefs.current.home;
       if (home) {
         const r = home.getBoundingClientRect();
-        setDockVisible(r.top < window.innerHeight - 220 && r.bottom > 260);
+        // The Log button fades and slides in as the Workout area comes up, and back out as it leaves.
+        const enter = Math.min(1, Math.max(0, (window.innerHeight - 120 - r.top) / 260));
+        const leave = Math.min(1, Math.max(0, (r.bottom - 180) / 200));
+        const p = Math.min(enter, leave);
+        dpRef.current = p;
+        if (saveBtnRef.current) { saveBtnRef.current.style.setProperty("--dp", String(p)); saveBtnRef.current.style.pointerEvents = p > 0.5 ? "auto" : "none"; }
+        setDockVisible(p > 0.01);
       }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -1817,7 +2024,7 @@ export default function Home() {
   };
 
   // ---- Lifter's Digest: stats computed here, worded by Claude when AI is on, plain text otherwise ----
-  const digestStats = useMemo(() => (loaded && strengthEntries.length ? computeDigestStats({ strengthEntries, dayStats, todayIso: todayISO(), workouts, exercises, due: dueWorkout ? { day: dueWorkout.workout.name, days: dueWorkout.days } : null, goal: (GOALS.find((g) => g.key === settings.goal) || GOALS[0]).label }) : null), [loaded, strengthEntries, dayStats, workouts, exercises, dueWorkout, settings.goal]);
+  const digestStats = useMemo(() => (loaded && strengthEntries.length ? computeDigestStats({ strengthEntries, dayStats, todayIso: todayISO(), workouts, exercises, due: dueWorkout ? { day: dueWorkout.workout.name, days: dueWorkout.days } : null, goal: (GOALS.find((g) => g.key === settings.goal) || GOALS[0]).label, unit }) : null), [loaded, strengthEntries, dayStats, workouts, exercises, dueWorkout, settings.goal, unit]);
   const digestSig = useMemo(() => (digestStats ? hashStr(JSON.stringify(digestStats)) : ""), [digestStats]);
   const [aiDigest, setAiDigest] = useState(null);
   useEffect(() => {
@@ -1866,7 +2073,7 @@ export default function Home() {
         list.push({ type: worstMover.pct < 0 ? "down" : "flat", text: worstMover.pct < 0 ? `${worstMover.exercise} is down ${Math.abs(worstMover.pct)}%, which might be worth extra attention.` : `${worstMover.exercise} is up only ${worstMover.pct}%, your slowest mover.` });
       }
       const strongest = allSeries.reduce((a, b) => (b.best > a.best ? b : a));
-      list.push({ type: "strongest", text: `${strongest.exercise} is your strongest lift, est. ${strongest.best} lb 1RM.` });
+      list.push({ type: "strongest", text: `${strongest.exercise} is your strongest lift, est. ${W(strongest.best)} ${unit} 1RM.` });
 
       // Near a personal record: current e1RM is close to (but hasn't yet matched) the all-time best.
       const nearPR = allSeries
@@ -1996,10 +2203,10 @@ export default function Home() {
     inRange.forEach((e) => { byDate[e.date] = pickBest(byDate[e.date], e, metric); });
     const rows = Object.keys(byDate).sort().map((date) => {
       const entry = byDate[date];
-      return { date, label: fmtDate(date), [chartFocusExercise]: setScore(entry, metric), [`${chartFocusExercise}__r`]: entry.reps, [`${chartFocusExercise}__s`]: entry.sets };
+      return { date, label: fmtDate(date), [chartFocusExercise]: W(setScore(entry, metric)), [`${chartFocusExercise}__r`]: entry.reps, [`${chartFocusExercise}__s`]: entry.sets };
     });
     return { rows, series: [chartFocusExercise] };
-  }, [entriesByExerciseStrength, chartRange, chartMetric, chartFocusExercise]);
+  }, [entriesByExerciseStrength, chartRange, chartMetric, chartFocusExercise, unit]);
 
   const alreadyImported = entries.some((e) => String(e.id).startsWith("import-v1-"));
   const runImport = () => {
@@ -2068,8 +2275,8 @@ export default function Home() {
     const to = xpage.ytd ? today : xpage.date;
     const series = buildExSeries(list, from, to);
     const dayEntries = list.filter((e) => e.date === xpage.date);
-    return { list, series, dayEntries, summary: exSummary(xpage.exercise, series, list.filter((e) => e.date >= from && e.date <= to), xpage.ytd) };
-  }, [xpage, entriesByExercise]);
+    return { list, series, dayEntries, summary: exSummary(xpage.exercise, series, list.filter((e) => e.date >= from && e.date <= to), xpage.ytd, W) };
+  }, [xpage, entriesByExercise, unit]);
   const xStats = useMemo(() => {
     if (!xpage) return null;
     const list = entriesByExercise[xpage.exercise] || [];
@@ -2100,12 +2307,37 @@ export default function Home() {
     return Math.round(((rows[rows.length - 1].value - rows[i].value) / rows[i].value) * 1000) / 10;
   }, [portfolioSeries]);
   const pull = useRef(null);
-  const onPullStart = (e) => { pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
+  const pullY0 = useRef(0);
+  const onPullStart = (e) => { pullY0.current = e.touches[0].clientY; pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
+  const TITLE_MAX = 64;
+  const [titlePull, setTitlePull] = useState(0);
+  const [titleDrag, setTitleDrag] = useState(false);
   const onPullMove = (e) => {
-    if (pull.current === null) return;
-    const dy = e.touches[0].clientY - pull.current;
-    if (dy > 56 && window.scrollY <= 0) { setCarouselOpen(true); pull.current = null; }
+    const y = e.touches[0].clientY;
+    // A short upward swipe anywhere near the top puts the cards away again.
+    if (carouselOpen && window.scrollY <= 1 && y - pullY0.current < -14) { setCarouselOpen(false); pull.current = null; setTitlePull(0); return; }
+    if (pull.current === null || window.scrollY > 0) return;
+    const dy = y - pull.current;
+    if (dy > 56) setCarouselOpen(true);
+    // Keep pulling past the cards and the app title shows, bottom first.
+    const t = Math.min(TITLE_MAX, Math.max(0, (dy - 56) * 0.9));
+    setTitleDrag(true);
+    setTitlePull((cur) => (Math.abs(cur - t) > 1 ? t : cur));
   };
+  const onPullEnd = () => { setTitleDrag(false); setTitlePull(0); };
+
+  // One-time start-up: the line draws in, the dots fall in from the top, and the text types itself out.
+  const [introOn, setIntroOn] = useState(() => !introPlayed && !(typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches));
+  const introStarted = useRef(false);
+  const introReady = !!(loaded && portfolioView);
+  useIsoLayoutEffect(() => {
+    if (!introOn || !introReady || introStarted.current) return undefined;
+    introStarted.current = true;
+    introPlayed = true;
+    typeIn(sectionRefs.current.portfolio);
+    const t = setTimeout(() => setIntroOn(false), 1500);
+    return () => clearTimeout(t);
+  }, [introOn, introReady]);
 
   if (passcode === null) return null;
 
@@ -2135,7 +2367,7 @@ export default function Home() {
         <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 52, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
-          <span className="muted" style={{ fontSize: "var(--fs-label)" }}>lbs ×</span>
+          <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{unit} ×</span>
           <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
           <span className="muted" style={{ fontSize: "var(--fs-label)" }}>×</span>
           <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
@@ -2147,7 +2379,7 @@ export default function Home() {
       <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
         <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
           <button type="button" className="hist-date" onClick={() => openExercise(e.exercise, e.date, false)} aria-label={`Open ${e.exercise} through ${fmtDate(e.date)}`}>{fmtDate(e.date)}</button>
-          <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+          <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
         </div>
       </SwipeRow>
     ) : (
@@ -2156,7 +2388,7 @@ export default function Home() {
           ? <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
           : <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> (warm-up)</span>}</span>}
         <span className="num">
-          {e.weight}<span className="muted">lbs</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
+          {W(e.weight)}<span className="muted">{unit}</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
           {compact && e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)" }}>(warm-up)</span>}
           <button className="del-btn" onClick={() => startEdit(e)} title="Edit" aria-label="Edit set">✎</button>
           <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: "var(--fs-label)", fontWeight: 600, color: e.isWarmup ? "var(--text-primary)" : "var(--text-secondary)" }}>W</button>
@@ -2170,6 +2402,7 @@ export default function Home() {
     <>
     <DotField />
     <div className="wrap">
+      <div className="status-fade" aria-hidden="true" />
       <div className="top-bar"><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
@@ -2179,13 +2412,13 @@ export default function Home() {
       ) : (
         <>
         {/* ---------------- OVERALL ---------------- */}
-        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove}>
+        <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd} onTouchCancel={onPullEnd}>
+          <DotTitle text={APP_TITLE} height={titlePull} dragging={titleDrag} />
           <button type="button" className={"pull-cue" + (carouselOpen ? " open" : "")} onClick={() => setCarouselOpen((v) => !v)} aria-label={carouselOpen ? "Hide exercises" : "Show exercises"}>
             <svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
           </button>
           <div className={"carousel" + (carouselOpen ? " open" : "")} aria-hidden={!carouselOpen}
-            onTouchStart={(e) => { pull.current = null; e.currentTarget._y = e.touches[0].clientY; }}
-            onTouchMove={(e) => { if (e.touches[0].clientY - (e.currentTarget._y || 0) < -40) setCarouselOpen(false); }}>
+            onTouchStart={() => { pull.current = null; }}>
             <div className="carousel-row">
               <button type="button" className="carousel-card all" tabIndex={carouselOpen ? 0 : -1} onClick={() => setCarouselOpen(false)}>
                 <span className="cc-name">All lifts</span>
@@ -2195,7 +2428,7 @@ export default function Home() {
               {carouselItems.map((it) => (
                 <button key={it.name} type="button" className="carousel-card" tabIndex={carouselOpen ? 0 : -1} onClick={() => openExercise(it.name, it.last, true)}>
                   <span className="cc-name">{tickerOf(it.name)}</span>
-                  <span className="cc-val">{it.e1rm} e1RM</span>
+                  <span className="cc-val">{W(it.e1rm)} e1RM</span>
                   <span className="cc-pct" style={{ color: it.pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{it.pct >= 0 ? "▲" : "▼"} {Math.abs(it.pct).toFixed(1)}%</span>
                 </button>
               ))}
@@ -2209,17 +2442,24 @@ export default function Home() {
               const rangeLabel = RANGE_PRESETS.find((r) => r.key === portfolioRange)?.label;
               return (
                 <>
-                  <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>
+                  {settings.dotNums !== false
+                    ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} intro={introOn} />
+                    : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
                   <span className="index-tag">Strength Index · {portfolioSeries.exerciseCount} lifts</span>
                 </>
               );
             })()}
+            <span className="unit-pill" role="group" aria-label="Weight unit">
+              <button type="button" className={unit === "lbs" ? "on" : ""} aria-pressed={unit === "lbs"} onClick={() => changeUnit("lbs")}>lbs</button>
+              <span className="unit-sep" aria-hidden="true">/</span>
+              <button type="button" className={unit === "kg" ? "on" : ""} aria-pressed={unit === "kg"} onClick={() => changeUnit("kg")}>kg</button>
+            </span>
           </div>
 
           <div className="chart-box">
             {portfolioView
-              ? <PortfolioChart rows={portfolioView.display} maRows={maKey === "off" ? null : portfolioView.maDisplay} color={portfolioView.up ? "var(--gain)" : "var(--loss)"} onScrub={setScrubPoint} />
+              ? <PortfolioChart rows={portfolioView.display} maRows={maKey === "off" ? null : portfolioView.maDisplay} color={portfolioView.up ? "var(--gain)" : "var(--loss)"} onScrub={setScrubPoint} intro={introOn} />
               : <div className="empty">Log sessions on a few exercises to see this.</div>}
           </div>
           {portfolioView && maKey !== "off" && (
@@ -2231,16 +2471,21 @@ export default function Home() {
             </div>
           )}
 
-          <div className="pills range-tabs" style={{ marginBottom: 8 }}>
+          <div className="pills range-tabs" style={{ marginBottom: 0 }}>
             {RANGE_PRESETS.map((r) => (
-              <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}>{r.label}</button>
+              <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}><span className="tab-l">{r.label}</span></button>
             ))}
           </div>
           <div className="pills pills-sub">
             {MA_OPTIONS.map((m) => (
-              <button key={m.key} className={"pill pill-sm" + (m.key === maKey ? " active" : "")} onClick={() => setMaKey(m.key)}>{m.label}</button>
+              <button key={m.key} className={"pill pill-sm" + (m.key === maKey ? " active" : "")} onClick={() => setMaKey(m.key)}><span className="tab-l">{m.label}</span></button>
             ))}
           </div>
+
+          <button className="log-set-row" onClick={() => scrollToSection("home")}>
+            <span>Log a set</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-title)" }}>›</span>
+          </button>
 
           <div className="digest-card2" onClick={() => setDigestOpen((o) => !o)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDigestOpen((o) => !o); }}>
             <div className="insights-head">
@@ -2263,10 +2508,6 @@ export default function Home() {
             </div>
           </div>
 
-          <button className="log-set-row" onClick={() => scrollToSection("home")}>
-            <span>Log a set</span>
-            <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-title)" }}>›</span>
-          </button>
         </div>
 
         {/* ---------------- WORKOUT (search, today's target, log) ---------------- */}
@@ -2285,7 +2526,7 @@ export default function Home() {
             {calendarOpen && <CalendarPopup selectedDate={selectedDate} onSelect={setSelectedDate} onClose={() => setCalendarOpen(false)} />}
           </div>
 
-          <div className="card card-tabbed">
+          <div className="card card-tabbed flat">
             {nextTarget && nextTarget !== swapTarget && (
               <button className="next-tab" onClick={() => selectExercise(nextTarget)} aria-label={`Next exercise ${nextTarget}`}>
                 <span className="next-tab-text">Next: {nextTarget}</span><span aria-hidden="true">›</span>
@@ -2330,9 +2571,9 @@ export default function Home() {
               if (!st) return null;
               return (
                 <div className="st-grid st-mini">
-                  <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{st.e5rm}</div></div>
-                  <div className="st-cell"><div className="st-label">e1RM</div><div className="st-val">{st.e1rm}</div></div>
-                  <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{st.lastSet.weight} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
+                  <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{W(st.e5rm)}</div></div>
+                  <div className="st-cell"><div className="st-label">e1RM</div><div className="st-val">{W(st.e1rm)}</div></div>
+                  <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{W(st.lastSet.weight)} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
                 </div>
               );
             })()}
@@ -2353,7 +2594,7 @@ export default function Home() {
                   No sets logged for {recExercise} yet. Enter the most weight you've lifted for it and how many reps, and that's enough to build a first recommendation.
                 </div>
                 <div className="row3" style={{ marginBottom: 0 }}>
-                  <input type="number" inputMode="decimal" placeholder="lbs" value={manualWeight} onChange={(e) => setManualWeight(e.target.value)} />
+                  <input type="number" inputMode="decimal" placeholder={unit} value={manualWeight} onChange={(e) => setManualWeight(e.target.value)} />
                   <input type="number" inputMode="numeric" placeholder="reps" value={manualReps} onChange={(e) => setManualReps(e.target.value)} />
                 </div>
               </div>
@@ -2362,16 +2603,16 @@ export default function Home() {
                 <div className="rec-top">
                   <div>
                     <div className="label-sm" style={{ marginBottom: 0 }}>Recommended today</div>
-                    <div className="rec-main">{recommendation.nextTopWeight}<span className="muted"> lbs × </span>{repsText(recommendation.repLow, recommendation.repHigh)}</div>
+                    <div className="rec-main">{Wrec(recommendation.nextTopWeight)}<span className="muted"> {unit} × </span>{repsText(recommendation.repLow, recommendation.repHigh)}</div>
                   </div>
-                  <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{recommendation.lastTop.weight} × {recommendation.lastTop.reps}</div>
+                  <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{W(recommendation.lastTop.weight)} × {recommendation.lastTop.reps}</div>
                 </div>
-                <div className="rec-note">{recommendation.note}</div>
+                <div className="rec-note">{cvText(recommendation.note)}</div>
                 <div className="today-list" style={{ marginTop: 8 }}>
                   {recommendation.rows.map((r) => (
                     <div key={r.set} className="today-item" style={{ padding: "8px 12px" }}>
                       <span style={{ fontWeight: 600 }}>Set {r.set}{r.set === 1 ? " (top)" : ""}</span>
-                      <span className="num">{r.weight}<span className="muted">lbs</span><span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
+                      <span className="num">{Wrec(r.weight)}<span className="muted">{unit}</span><span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
                     </div>
                   ))}
                 </div>
@@ -2397,7 +2638,7 @@ export default function Home() {
             )}
 
             <div className="stepper-list" style={{ marginTop: 12 }}>
-              {[["weight", "Weight (lbs)", "lbs", "decimal", 5], ["sets", "Sets", "sets", "numeric", 1], ["reps", "Reps", "reps", "numeric", 1]].map(([key, label, ph, mode, step]) => (
+              {[["weight", `Weight (${unit})`, unit, "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "reps", "numeric", 1], ["sets", "Sets", "sets", "numeric", 1]].map(([key, label, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
                   <div className="label-sm stepper-label">{label}</div>
                   <div className="stepper-row">
@@ -2410,7 +2651,7 @@ export default function Home() {
             </div>
             <div className="warm-row">
               <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
-              <div className="helper">Warm-up sets don't count toward recommendations or your top set</div>
+              <WarmInfo />
             </div>
           </div>
 
@@ -2496,7 +2737,7 @@ export default function Home() {
             <div className="empty">{chartFocusExercise ? "No sets logged in this range yet." : "Pick an exercise to see its progress."}</div>
           ) : (
             <div className="card">
-              <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} />
+              <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={unit} />
               <div className="chart-note">
                 Best set of each day. Hold and drag for the exact reps, sets and weight.{chartMetric === "e1rm" && " Est. 1RM uses the Epley formula, counting up to 10 reps."}
               </div>
@@ -2504,7 +2745,7 @@ export default function Home() {
           )}
 
           {chartFocusExercise && (
-            <div className="card">
+            <div className="card flat">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <div className="label-sm" style={{ marginBottom: 0 }}>History · {focusHistory.length} logged</div>
                 <div style={{ display: "flex", gap: 12 }}>
@@ -2542,34 +2783,26 @@ export default function Home() {
 
           <div className="label-sm" style={{ margin: "24px 0 12px" }}>Training overview</div>
           <div className="card">
-            <div className="label-sm" style={{ textAlign: "center" }}>Strength growth by category</div>
+            <CardHead title="Strength growth by category" info="Average % change in estimated 1RM per workout, all-time. Tap the chart for the exact span. Hollow points mean not enough data yet." />
             <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
             {radarInfoOpen && allTimeRange && (
               <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
               </div>
             )}
-            <div className="axis-caption" style={{ marginBottom: 0 }}>Average % change in estimated 1RM per workout, all-time. Tap for the exact span. Hollow points mean not enough data yet.</div>
           </div>
           <div className="card">
-            <div className="label-sm" style={{ textAlign: "center" }}>Weekly training volume</div>
-            <VolumeBarChart weeks={weeklyVolume} onTapBar={(w) => setVolumeTapInfo(w)} />
-            {volumeTapInfo && (
-              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-                Week of {fmtDate(volumeTapInfo.start)} – {fmtDate(volumeTapInfo.end)}{volumeTapInfo.isCurrent ? " (so far)" : ""}
-              </div>
-            )}
-            <div className="axis-caption" style={{ marginBottom: 0 }}>Weight × sets × reps per week, Monday to Sunday, last 10 weeks. This week is blue. Tap a bar for its dates.</div>
+            <CardHead title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. This week is highlighted." />
+            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => {}} />
           </div>
           <div className="card">
-            <div className="label-sm" style={{ textAlign: "center" }}>Training consistency</div>
+            <CardHead title="Training consistency" info="Each column is a week (Monday to Sunday). Brighter means more sets logged that day. Tap the chart for the span." />
             <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} />
             {heatmapInfoOpen && heatmapWeeks.length > 0 && (
               <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
               </div>
             )}
-            <div className="axis-caption" style={{ marginBottom: 0 }}>Each column is a week (Monday to Sunday). Darker means more sets logged that day. Tap for the span.</div>
           </div>
         </div>
 
@@ -2643,7 +2876,9 @@ export default function Home() {
                 const up = pct >= 0;
                 return (
                   <>
-                    <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>
+                    {settings.dotNums !== false
+                      ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} />
+                      : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                     <span className="index-meta"><span className="cap">{xScrub ? xScrub.label : xpage.ytd ? "YTD" : "Since first log"}</span></span>
                     <span className="index-tag">Estimated 1RM · {xData.series.sessions} sessions</span>
                   </>
@@ -2667,19 +2902,19 @@ export default function Home() {
               return (
                 <div className="stats-block">
                   <div className="st-grid">
-                    {cell("e1RM", xStats.e1rm)}
-                    {cell("e5RM", xStats.e5rm)}
+                    {cell("e1RM", W(xStats.e1rm))}
+                    {cell("e5RM", W(xStats.e5rm))}
                     {cell(xpage.ytd ? "YTD" : "Change", pct === null ? "n/a" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`, pct === null ? null : pct >= 0 ? "var(--gain)" : "var(--loss)")}
-                    {cell("Volume", fmtNum(xStats.volume))}
+                    {cell(`Volume (${unit})`, fmtNum(W(xStats.volume)))}
                     {cell("Sessions", xStats.sessions)}
                     {cell("Sets / Reps", `${xStats.sets} / ${fmtNum(xStats.reps)}`)}
-                    {cell("PR", `${xStats.prWeight}`)}
-                    {cell("Avg wt / rep", xStats.avgPerRep || "n/a")}
+                    {cell("PR", `${W(xStats.prWeight)}`)}
+                    {cell("Avg wt / rep", xStats.avgPerRep ? W(xStats.avgPerRep) : "n/a")}
                     {cell("Last session", ago(xStats.lastDate))}
                   </div>
                   <div className="st-head">All time</div>
                   <div className="st-grid">
-                    {cell("Volume", fmtNum(xStats.allVolume))}
+                    {cell(`Volume (${unit})`, fmtNum(W(xStats.allVolume)))}
                     {cell("Sessions", xStats.allSessions)}
                     {cell("First logged", fmtDate(xStats.firstDate))}
                   </div>
@@ -2687,7 +2922,7 @@ export default function Home() {
               );
             })()}
 
-            <div className="card card-tabbed" style={{ marginTop: 24 }}>
+            <div className="card card-tabbed flat" style={{ marginTop: 24 }}>
               <button type="button" className="next-tab" onClick={() => setXEdit((v) => !v)}>
                 <span className="next-tab-text">{xEdit ? "Done" : "Edit"}</span>{!xEdit && <span aria-hidden="true">›</span>}
               </button>
@@ -2698,21 +2933,21 @@ export default function Home() {
                     ? renderEditableRow(e, false)
                     : (
                       <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
-                        <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                        <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
                       </div>
                     )))}
                 </div>
               )}
             </div>
 
-            <div className="card">
+            <div className="card flat">
               <div className="label-sm">All sessions · {xData.list.length}</div>
               <div className="hist-list">
                 {xData.list.map((e) => (editingId === e.id ? renderEditableRow(e, true) : (
                   <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
                     <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
                       <button type="button" className={"hist-date" + (e.date === xpage.date ? " on" : "")} onClick={() => { setXpage({ ...xpage, date: e.date, ytd: false }); setXScrub(null); }}>{fmtDate(e.date)}</button>
-                      <span className="hist-nums">{e.weight} lbs · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                      <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
                     </div>
                   </SwipeRow>
                 )))}
@@ -2765,6 +3000,8 @@ export default function Home() {
                 <button key={label} className={"pill" + (!!settings.glass === k ? " active" : "")} onClick={() => updateSettings({ glass: k })}>{label}</button>
               ))}
             </div>
+
+            <label className="toggle-row" style={{ marginTop: 8 }}><span>Dot-matrix numbers</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.dotNums !== false} onChange={(e) => updateSettings({ dotNums: e.target.checked })} /></label>
 
             <div className="label-sm" style={{ marginTop: 16 }}>Gains and losses</div>
             <div className="gl-grid">
@@ -2848,24 +3085,24 @@ export default function Home() {
             </div>
           )}
           {dockVisible && (
-            <button className="btn-iron save-btn dock-save" onClick={() => submitSet()} disabled={!form.exercise.trim() || !form.weight} style={{ opacity: form.exercise.trim() && form.weight ? 1 : 0.55 }}>
+            <button ref={(el) => { saveBtnRef.current = el; if (el) { el.style.setProperty("--dp", String(dpRef.current)); el.style.pointerEvents = dpRef.current > 0.5 ? "auto" : "none"; } }} className="btn-iron save-btn dock-save" onClick={() => submitSet()} disabled={!form.exercise.trim() || !form.weight} style={{ "--en": form.exercise.trim() && form.weight ? 1 : 0.55 }}>
               {form.exercise.trim() ? `Log set · ${form.exercise.trim()}` : "Log set"}
             </button>
           )}
         </div>
       )}
 
-      <div className="bottom-nav" ref={navRef} style={{ "--i": activeSection === "charts" ? 0 : activeSection === "home" ? 2 : 1 }}>
+      <div className="bottom-nav" ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
-        <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
-          <IconChart color="currentColor" /><span>Progress</span>
-        </button>
         <button className={"bottom-nav-item bottom-nav-item-main" + (activeSection === "portfolio" ? " active" : "")} onClick={() => scrollToSection("portfolio")}>
           <IconHome color="currentColor" size={24} /><span>Overall</span>
         </button>
         <button className={"bottom-nav-item" + (activeSection === "home" ? " active" : "")} onClick={() => scrollToSection("home")}>
           <IconBulb color="currentColor" /><span>Workout</span>
+        </button>
+        <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
+          <IconChart color="currentColor" /><span>Progress</span>
         </button>
       </div>
     </div>

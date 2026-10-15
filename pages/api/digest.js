@@ -5,7 +5,7 @@ const redis = Redis.fromEnv();
 const MODEL = process.env.DIGEST_MODEL || "claude-haiku-5-5";
 const DAILY_LIMIT = 12; // fresh generations per person per day (cached repeats don't count)
 
-const SYSTEM = `You write the Lifter's Digest for a strength-training app. The user message is JSON with precomputed training stats; the app already did all the math.
+const SYSTEM = `You write the Lifter's Digest for a strength-training app. The user message is JSON with precomputed training stats; the app already did all the math. The field "unit" is the weight unit (lbs or kg); say weights in that unit.
 Write four short sections as plain text:
 - last: what they hit in their last workout (use lastWorkout: day name, how long ago, the top sets). Mention any newPRs.
 - up: what is improving (use improving, with the percentages) and the likely why from each item's drivers.
