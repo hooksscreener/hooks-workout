@@ -430,3 +430,27 @@ svg text{font-family:var(--font-num);}
 [data-dotnums="on"] .feed-row{border-top-style:dotted;}
 [data-dotnums="on"] .feed-toggle{border-style:dotted;}
 [data-dotnums="on"] .feed-toggle.on{border-style:solid;}
+
+/* ---- Round 11 ---- */
+.portfolio-change{position:relative;}
+.portfolio-change .unit-pill{position:absolute;top:0;right:0;margin:0;order:0;}
+.portfolio-change .index-meta{white-space:nowrap;}
+
+/* ---- Round 12: camera ---- */
+.scan-btn{width:100%;justify-content:center;margin-bottom:var(--s-2);}
+
+/* ---- Round 13: notes photo, info font, build tag ---- */
+.info-dot{font-family:var(--font-text) !important;font-size:.8125rem;}
+.ver-tag{font-size:.6875rem;font-weight:400;color:var(--text-tertiary);margin-left:var(--s-2);}
+.notes-top{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-2);margin-bottom:var(--s-3);}
+.notes-field{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.notes-row{padding:var(--s-2) 0;border-top:1px solid var(--border);}
+.notes-row.off{opacity:.35;}
+.notes-row.unsure .notes-ex{border-color:var(--accent);}
+.notes-ex{width:100%;margin-bottom:6px;}
+.notes-nums{display:flex;align-items:center;gap:6px;}
+.notes-nums input{flex:1;min-width:0;text-align:center;padding-left:4px;padding-right:4px;}
+.notes-nums .chip{min-height:44px;padding:0 var(--s-3);}
+.notes-meta{font-size:.75rem;color:var(--text-secondary);margin-top:4px;}
+[data-dotnums="on"] .notes-row{border-top-style:dotted;}
+.notes-nums .clear-x{position:static;transform:none;top:auto;right:auto;flex:none;width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:var(--r-input);color:var(--text-secondary);}

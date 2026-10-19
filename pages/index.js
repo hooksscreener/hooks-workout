@@ -28,6 +28,7 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
+const BUILD_TAG = "Build 13 · Oct 19";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -408,9 +409,13 @@ function typeIn(root, { delay = 280, duration = 620 } = {}) {
   const lens = nodes.map((n) => n.nodeValue.length), total = lens.reduce((a, b) => a + b, 0);
   if (!total) return;
   const start = performance.now() + delay;
+  // Failsafe: the text must never stay hidden. Clear on a timer, on touch or scroll, and when the tab returns.
+  const clear = () => { CSS.highlights.delete("typein"); window.removeEventListener("touchstart", clear); window.removeEventListener("scroll", clear); document.removeEventListener("visibilitychange", clear); };
+  setTimeout(clear, delay + duration + 400);
+  window.addEventListener("touchstart", clear, { passive: true }); window.addEventListener("scroll", clear, { passive: true }); document.addEventListener("visibilitychange", clear);
   const frame = (now) => {
     const p = Math.min(1, Math.max(0, (now - start) / duration)), count = Math.floor(p * total);
-    if (p >= 1) { CSS.highlights.delete("typein"); return; }
+    if (p >= 1) { clear(); return; }
     const ranges = []; let cum = 0;
     nodes.forEach((n, i) => {
       const len = Math.min(lens[i], n.nodeValue.length), from = Math.max(0, count - cum);
@@ -1246,7 +1251,8 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
 function ConsistencyHeatmap({ weeks, onTap, dots }) {
   // weeks: [[{date, count, future}, ...7 days Monday to Sunday], ...]
   const cell = 20, gap = 4;
-  const W = weeks.length * (cell + gap);
+  const labelW = 26, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
+  const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
   const colorFor = () => "var(--accent)";
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
@@ -1255,15 +1261,19 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
       {dots ? weeks.map((week, wi) => week.map((day, di) => {
         // Each day is a small square made of a 3 x 3 grid of the same tiny dots the volume bars use.
         const pt = 6.4, x0 = wi * (cell + gap) + (cell - 2 * pt) / 2, y0 = di * (cell + gap) + (cell - 2 * pt) / 2, out = [];
+        // More sets logged means more of the 9 dots light up, filling from the bottom row up (0, 3, 6 or 9).
+        const lit = day.future ? 0 : [0, 3, 6, 9][Math.min(day.count, 3)];
         for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+          const fromBottom = (2 - r) * 3 + c;
           out.push(day.future
             ? <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="1.2" fill="var(--border)" />
-            : <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="2.4" fill={day.count === 0 ? "var(--border)" : "var(--accent)"} fillOpacity={day.count === 0 ? 1 : opFor(day.count)} />);
+            : <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="2.4" fill={fromBottom < lit ? "var(--accent)" : "var(--border)"} />);
         }
         return <g key={`${wi}-${di}`}>{out}</g>;
       })) : weeks.map((week, wi) => week.map((day, di) => (
         <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={day.future || day.count === 0 ? 1 : opFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
+      {DAYS.map((d, di) => <text key={d} x={W - labelW + 6} y={di * (cell + gap) + cell / 2 + 3} fontSize="9" fill="var(--text-primary)">{d}</text>)}
     </svg>
   );
 }
@@ -1614,7 +1624,90 @@ export default function Home() {
     selectExercise(trimmed);
     return true;
   };
-  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseTicker(""); setNewExerciseDays([]); };
+  // Camera: photo of workout notes becomes a list of sets to check and save.
+  const notesInputRef = useRef(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesMsg, setNotesMsg] = useState("");
+  const [notesRows, setNotesRows] = useState([]);
+  const [notesDate, setNotesDate] = useState("");
+  const [notesDay, setNotesDay] = useState("");
+  const [notesToast, setNotesToast] = useState("");
+  const scanNotes = async (file) => {
+    if (!file) return;
+    setNotesOpen(true); setNotesBusy(true); setNotesMsg("Reading your notes…"); setNotesRows([]);
+    setNotesDate(todayISO()); setNotesDay(activeWorkoutId || (workouts[0] && workouts[0].id) || "");
+    try {
+      const image = await shrinkImage(file, 1600, 0.85);
+      const res = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ image, mediaType: "image/jpeg", known: allExerciseNames, unit }) });
+      if (res.status === 429) { setNotesMsg("That's enough note photos for today."); return; }
+      if (!res.ok) { setNotesMsg("Notes camera isn't available right now."); return; }
+      const out = await res.json();
+      if (out.disabled) { setNotesMsg("Notes camera is turned off."); return; }
+      if (!out.lines || !out.lines.length) { setNotesMsg("Couldn't find any sets. Try a closer, brighter photo."); return; }
+      const noteUnit = out.unit || unit;
+      setNotesRows(out.lines.map((l, i) => ({ id: i, exercise: l.exercise, match: !!l.match, weight: String(noteUnit === unit ? l.weight : noteUnit === "kg" ? Math.round(l.weight * 2.20462 * 10) / 10 : Math.round(l.weight / 2.20462 * 10) / 10), reps: String(l.reps), sets: String(l.sets), warmup: !!l.warmup, sure: l.sure, raw: l.raw, keep: true })));
+      if (out.date && out.date <= todayISO()) setNotesDate(out.date);
+      setNotesMsg(out.date ? `Date on the page: ${fmtDate(out.date)}. Check everything, then save.` : "Check every line, then save.");
+    } catch (e) { setNotesMsg("Couldn't read that photo. Try again."); }
+    finally { setNotesBusy(false); if (notesInputRef.current) notesInputRef.current.value = ""; }
+  };
+  const saveNotes = () => {
+    const rows = notesRows.filter((r) => r.keep && r.exercise.trim() && r.weight !== "" && !isNaN(parseFloat(r.weight)));
+    if (!rows.length) return;
+    const nextEx = { ...exercises };
+    const made = rows.map((r, i) => {
+      const typed = r.exercise.trim();
+      const canon = allExerciseNames.find((n) => n.toLowerCase() === typed.toLowerCase()) || typed;
+      const home = findExerciseHome(canon) || notesDay || activeWorkoutId;
+      const list = nextEx[home] || [];
+      if (!list.some((e) => e.toLowerCase() === canon.toLowerCase())) nextEx[home] = [...list, canon];
+      return { id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`, workoutId: home, exercise: canon, weight: toLbs(r.weight), sets: Math.max(1, Number(r.sets) || 1), reps: Math.max(0, Number(r.reps) || 0), date: notesDate || todayISO(), isWarmup: !!r.warmup };
+    });
+    persist({ workouts, exercises: nextEx, entries: [...made.slice().reverse(), ...entries] });
+    fx("click");
+    setNotesOpen(false); setNotesRows([]);
+    setNotesToast(`Saved ${made.length} ${made.length === 1 ? "set" : "sets"}`);
+    setTimeout(() => setNotesToast(""), 3500);
+  };
+  const setNotesRow = (id, patch) => setNotesRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  // Camera: photo of a machine's nameplate fills in the new-exercise form for the user to check.
+  const scanInputRef = useRef(null);
+  const [scanMsg, setScanMsg] = useState("");
+  const [scanBusy, setScanBusy] = useState(false);
+  const shrinkImage = (file, maxDim = 1280, quality = 0.8) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height)), w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL("image/jpeg", quality).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("bad image")); };
+    img.src = url;
+  });
+  const scanMachine = async (file) => {
+    if (!file) return;
+    setScanBusy(true); setScanMsg("Reading the machine…");
+    try {
+      const image = await shrinkImage(file);
+      const res = await fetch("/api/identify", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ image, mediaType: "image/jpeg" }) });
+      if (res.status === 429) { setScanMsg("That's enough photos for today."); return; }
+      if (!res.ok) { setScanMsg("Camera isn't available right now. Type the name instead."); return; }
+      const out = await res.json();
+      if (out.disabled) { setScanMsg("Camera is turned off. Type the name instead."); return; }
+      if (!out.found) { setScanMsg("Couldn't read a machine name. Try the placard close up, or type it."); return; }
+      setNewExerciseName(out.name);
+      setNewExerciseBrand(out.brand || "");
+      const m = { push: "push", pull: "pull", legs: "leg", arms: "arm", core: "core" }[out.muscle];
+      const match = m ? workouts.filter((w) => w.name.toLowerCase().includes(m)).map((w) => w.id) : [];
+      if (match.length) setNewExerciseDays(match);
+      setScanMsg("Read from your photo. Check the name, brand and day, then add it.");
+    } catch (e) { setScanMsg("Couldn't read that photo. Try again or type the name."); }
+    finally { setScanBusy(false); if (scanInputRef.current) scanInputRef.current.value = ""; }
+  };
+  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseTicker(""); setNewExerciseDays([]); setScanMsg(""); };
 
   // Which workout an exercise "lives in" is decided by where it's already listed, not by
   // whichever tab happens to be open — so logging a Squat always files as Legs regardless
@@ -2384,15 +2477,20 @@ export default function Home() {
     return Math.round(((rows[rows.length - 1].value - rows[i].value) / rows[i].value) * 1000) / 10;
   }, [portfolioSeries]);
   const pull = useRef(null);
+  const chartTap = useRef(null);
   const pullY0 = useRef(0);
-  const onPullStart = (e) => { pullY0.current = e.touches[0].clientY; pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
+  const pullX0 = useRef(0);
+  const pullAtTop = useRef(false);
+  const onPullStart = (e) => { pullY0.current = e.touches[0].clientY; pullX0.current = e.touches[0].clientX; pullAtTop.current = window.scrollY <= 1; pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
   const TITLE_MAX = 64;
   const [titlePull, setTitlePull] = useState(0);
   const [titleDrag, setTitleDrag] = useState(false);
   const onPullMove = (e) => {
     const y = e.touches[0].clientY;
     // A short upward swipe anywhere near the top puts the cards away again.
-    if (carouselOpen && window.scrollY <= 1 && y - pullY0.current < -14) { setCarouselOpen(false); pull.current = null; setTitlePull(0); return; }
+    // Only a clearly vertical, upward swipe puts the cards away. Sideways swipes through the tickers never do.
+    const ddx = Math.abs(e.touches[0].clientX - pullX0.current), ddy = y - pullY0.current;
+    if (carouselOpen && pullAtTop.current && ddy < -70 && -ddy > ddx * 2.5) { setCarouselOpen(false); pull.current = null; setTitlePull(0); return; }
     if (pull.current === null || window.scrollY > 0) return;
     const dy = y - pull.current;
     if (dy > 56) setCarouselOpen(true);
@@ -2746,16 +2844,24 @@ export default function Home() {
           )}
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-            {!addingExercise ? (
-              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
-            ) : (
-              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={resetAddForm}>Cancel new exercise</button>
-            )}
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              {!addingExercise ? (
+                <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
+              ) : (
+                <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={resetAddForm}>Cancel new exercise</button>
+              )}
+              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => notesInputRef.current && notesInputRef.current.click()}>Log from notes photo</button>
+              <input ref={notesInputRef} type="file" accept="image/*" hidden onChange={(e) => scanNotes(e.target.files && e.target.files[0])} />
+            </div>
             <button className="add-ex-link" style={{ marginBottom: 0, flexShrink: 0 }} onClick={clearForm}>Clear All</button>
           </div>
           {addingExercise && (
             <div className="card add-card">
               <div className="label-sm">New exercise</div>
+              <button type="button" className="chip scan-btn" disabled={scanBusy} onClick={() => scanInputRef.current && scanInputRef.current.click()}>{scanBusy ? "Reading…" : "Scan machine with camera"}</button>
+              <input ref={scanInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => scanMachine(e.target.files && e.target.files[0])} />
+              {scanMsg && <div className="helper" style={{ marginBottom: 8 }}>{scanMsg}</div>}
+              <div className="helper" style={{ marginBottom: 8 }}>Tip: photograph the placard with the machine name and brand.</div>
               <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 8 }} />
               <input value={newExerciseTicker} onChange={(e) => setNewExerciseTicker(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))} placeholder={`Ticker (optional, ${defaultTicker(newExerciseName) || "e.g. BENCH"})`} maxLength={5} autoCapitalize="characters" style={{ marginBottom: 8, fontFamily: "var(--font-num)", letterSpacing: ".06em" }} />
               <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 12 }} />
@@ -2816,9 +2922,19 @@ export default function Home() {
             <div className="empty">{chartFocusExercise ? "No sets logged in this range yet." : "Pick an exercise to see its progress."}</div>
           ) : (
             <div className="card">
-              <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={unit} />
+              <div
+                onPointerDown={(e) => { chartTap.current = { t: Date.now(), x: e.clientX, y: e.clientY }; }}
+                onPointerUp={(e) => {
+                  const st = chartTap.current; chartTap.current = null;
+                  if (st && chartFocusExercise && Date.now() - st.t < 220 && Math.hypot(e.clientX - st.x, e.clientY - st.y) < 8) {
+                    openExercise(chartFocusExercise, ((entriesByExercise[chartFocusExercise] || [])[0] || {}).date, true);
+                  }
+                }}
+              >
+                <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={unit} />
+              </div>
               <div className="chart-note">
-                Best set of each day. Hold and drag for the exact reps, sets and weight.{chartMetric === "e1rm" && " Est. 1RM uses the Epley formula, counting up to 10 reps."}
+                Tap the chart for the exercise overview. Best set of each day. Hold and drag for the exact reps, sets and weight.{chartMetric === "e1rm" && " Est. 1RM uses the Epley formula, counting up to 10 reps."}
               </div>
             </div>
           )}
@@ -2884,7 +3000,7 @@ export default function Home() {
                 {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
               </div>
             )}
-            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). Bigger, brighter dots mean more sets logged that day. Tap the chart for the span." />
+            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). More lit dots mean more sets logged that day (3, 6 or 9). Tap the chart for the span." />
           </div>
         </div>
 
@@ -3039,13 +3155,55 @@ export default function Home() {
         </div>
       )}
 
+      {notesOpen && (
+        <>
+          <div className="sheet-backdrop" onClick={() => { if (!notesBusy) setNotesOpen(false); }} />
+          <div className="sheet notes-sheet" role="dialog" aria-label="Log from notes photo">
+            <div className="sheet-grip" />
+            <div className="sheet-head">
+              <span className="sheet-title">Log from notes</span>
+              <button className="close-btn" onClick={() => setNotesOpen(false)} aria-label="Close" disabled={notesBusy}>✕</button>
+            </div>
+            <div className="helper" style={{ marginBottom: 8 }}>{notesMsg}</div>
+            {notesRows.length > 0 && (
+              <>
+                <div className="notes-top">
+                  <label className="notes-field"><span className="label-sm">Date</span><input type="date" value={notesDate} max={todayISO()} onChange={(e) => setNotesDate(e.target.value)} /></label>
+                  <label className="notes-field"><span className="label-sm">New exercises go to</span>
+                    <select className="scope" value={notesDay} onChange={(e) => setNotesDay(e.target.value)}>{workouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
+                  </label>
+                </div>
+                <datalist id="notes-ex">{allExerciseNames.map((n) => <option key={n} value={n} />)}</datalist>
+                {notesRows.map((r) => (
+                  <div key={r.id} className={"notes-row" + (r.keep ? "" : " off") + (r.sure ? "" : " unsure")}>
+                    <input className="notes-ex" list="notes-ex" value={r.exercise} onChange={(e) => setNotesRow(r.id, { exercise: e.target.value, match: allExerciseNames.some((n) => n.toLowerCase() === e.target.value.trim().toLowerCase()) })} aria-label="Exercise" />
+                    <div className="notes-nums">
+                      <input inputMode="decimal" value={r.weight} onChange={(e) => setNotesRow(r.id, { weight: e.target.value })} aria-label={`Weight (${unit})`} />
+                      <span>×</span>
+                      <input inputMode="numeric" value={r.reps} onChange={(e) => setNotesRow(r.id, { reps: e.target.value })} aria-label="Reps" />
+                      <span>×</span>
+                      <input inputMode="numeric" value={r.sets} onChange={(e) => setNotesRow(r.id, { sets: e.target.value })} aria-label="Sets" />
+                      <button type="button" className={"chip" + (r.warmup ? " active" : "")} aria-pressed={r.warmup} onClick={() => setNotesRow(r.id, { warmup: !r.warmup })}>W</button>
+                      <button type="button" className="clear-x" aria-label="Remove line" onClick={() => setNotesRow(r.id, { keep: !r.keep })}>{r.keep ? "✕" : "↺"}</button>
+                    </div>
+                    <div className="notes-meta">{r.keep && !allExerciseNames.some((n) => n.toLowerCase() === r.exercise.trim().toLowerCase()) ? "New exercise · " : ""}{!r.sure ? "Check this one · " : ""}{r.raw ? `“${r.raw}”` : ""}</div>
+                  </div>
+                ))}
+                <button className="btn-iron save-btn" style={{ marginTop: 12 }} onClick={saveNotes} disabled={!notesRows.some((r) => r.keep)}>Save {notesRows.filter((r) => r.keep).length} {notesRows.filter((r) => r.keep).length === 1 ? "line" : "lines"} ({unit})</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+      {notesToast && <div className="undo-toast">{notesToast}</div>}
+
       {settingsOpen && (
         <>
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
           <div className="sheet sheet-settings" role="dialog" aria-label="Settings">
             <div className="sheet-grip" />
             <div className="sheet-head">
-              <span className="sheet-title">Settings</span>
+              <span className="sheet-title">Settings <span className="ver-tag">{BUILD_TAG}</span></span>
               <button className="close-btn" onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
             </div>
 
