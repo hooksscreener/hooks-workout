@@ -28,7 +28,7 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
-const BUILD_TAG = "Build 13 · Oct 19";
+const BUILD_TAG = "Build 14 · Oct 19";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -396,47 +396,32 @@ function DotTitle({ text, height, dragging, progress = 1 }) {
   );
 }
 
-// One-time start-up effect: characters of everything under `root` appear one by one, like text being typed
-// on an old terminal. Uses the CSS Custom Highlight API, so no markup is touched and nothing moves.
+// One-time start-up effect: text under `root` is revealed left to right, top to bottom, like typing on an old
+// terminal. It is pure CSS animation (clip-path), staggered by position, so it always finishes on its own and
+// can never leave text hidden.
 let introPlayed = false;
-function typeIn(root, { delay = 280, duration = 620 } = {}) {
-  if (typeof window === "undefined" || !root || !window.CSS || !CSS.highlights || typeof Highlight === "undefined") return;
-  const nodes = [];
-  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.nodeValue.trim() && !n.parentElement.closest("svg,canvas,.carousel,script,style,[data-notype]") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+function typeIn(root, { delay = 260, spread = 420 } = {}) {
+  if (typeof window === "undefined" || !root) return;
+  const sel = ".label-sm,.cap,.index-tag,.tab-l,.ma-readout,.dg-label,.dg-text,.insight-count,.wt-name,.wt-ago,.log-set-row span";
+  const els = Array.from(root.querySelectorAll(sel)).filter((el) => !el.closest("svg,canvas,.carousel,[data-notype]"));
+  if (!els.length) return;
+  const top0 = root.getBoundingClientRect().top, vh = window.innerHeight || 800;
+  els.forEach((el) => {
+    const t = Math.min(1, Math.max(0, (el.getBoundingClientRect().top - top0) / vh));
+    el.style.setProperty("--ty", `${Math.round(delay + t * spread)}ms`);
   });
-  while (w.nextNode()) nodes.push(w.currentNode);
-  const lens = nodes.map((n) => n.nodeValue.length), total = lens.reduce((a, b) => a + b, 0);
-  if (!total) return;
-  const start = performance.now() + delay;
-  // Failsafe: the text must never stay hidden. Clear on a timer, on touch or scroll, and when the tab returns.
-  const clear = () => { CSS.highlights.delete("typein"); window.removeEventListener("touchstart", clear); window.removeEventListener("scroll", clear); document.removeEventListener("visibilitychange", clear); };
-  setTimeout(clear, delay + duration + 400);
-  window.addEventListener("touchstart", clear, { passive: true }); window.addEventListener("scroll", clear, { passive: true }); document.addEventListener("visibilitychange", clear);
-  const frame = (now) => {
-    const p = Math.min(1, Math.max(0, (now - start) / duration)), count = Math.floor(p * total);
-    if (p >= 1) { clear(); return; }
-    const ranges = []; let cum = 0;
-    nodes.forEach((n, i) => {
-      const len = Math.min(lens[i], n.nodeValue.length), from = Math.max(0, count - cum);
-      if (from < len) { try { const r = new Range(); r.setStart(n, from); r.setEnd(n, len); ranges.push(r); } catch (e) { /* node changed */ } }
-      cum += lens[i];
-    });
-    CSS.highlights.set("typein", new Highlight(...ranges));
-    requestAnimationFrame(frame);
-  };
-  const first = []; nodes.forEach((n) => { try { const r = new Range(); r.setStart(n, 0); r.setEnd(n, n.nodeValue.length); first.push(r); } catch (e) { /* ignore */ } });
-  CSS.highlights.set("typein", new Highlight(...first));
-  requestAnimationFrame(frame);
+  root.classList.add("intro-typing");
+  setTimeout(() => { root.classList.remove("intro-typing"); els.forEach((el) => el.style.removeProperty("--ty")); }, delay + spread + 900);
 }
 
 // A static (i) in the lower left corner of a card. Tap it to show or hide the description beside it.
-function InfoFoot({ title, info }) {
+function InfoFoot({ title, info, right }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="info-foot">
       <button type="button" className="info-dot" aria-label={`About ${title}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
       {open && <div className="axis-caption info-body">{info}</div>}
+      {right}
     </div>
   );
 }
@@ -469,31 +454,71 @@ function agoText(ts) {
   return h < 24 ? `${h}h` : `${Math.round(h / 24)}d`;
 }
 
-function FeedCard({ source = mockSocial }) {
+function DotCamera({ size = 4, color = "currentColor" }) {
+  const map = ["...###.....", "###########", "##.......##", "##..###..##", "##..#.#..##", "##..###..##", "##.......##", "###########"];
+  return (
+    <svg width={11 * size} height={8 * size} viewBox={`0 0 ${11 * size} ${8 * size}`} aria-hidden="true" fill={color}>
+      {map.flatMap((row, y) => row.split("").map((c, x) => (c === "#" ? <circle key={`${x}-${y}`} cx={x * size + size / 2} cy={y * size + size / 2} r={size * 0.38} /> : null)))}
+    </svg>
+  );
+}
+
+const likeSeed = (id) => 3 + ([...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % 38);
+const EMBLEM = { PR: "PR", Streak: "STREAK", Growth: "GROWTH", Volume: "VOLUME" };
+
+function FeedPage({ source = mockSocial }) {
   const [mode, setMode] = useState(FEED_MODES.DISCOVERY); // null = Community Discovery (default)
+  const [liked, setLiked] = useState({});
+  const [note, setNote] = useState("");
   const toggle = (m) => setMode((cur) => (cur === m ? FEED_MODES.DISCOVERY : m));
   const items = useMemo(() => filterFeed({ ...source, mode }), [source, mode]);
-  const heading = mode === "friends" ? "Friends" : mode === "fof" ? "Friends of friends" : "Community";
+  const heading = mode === "friends" ? "Friends only" : mode === "fof" ? "Friends of friends" : "Community";
   return (
-    <div className="feed-card" data-notype>
-      <div className="insights-head">
-        <span className="label-sm" style={{ marginBottom: 0 }}>Feed · {heading}<span className="ai-tag">Sample</span></span>
+    <div className="feedpage" role="region" aria-label="Feed">
+      <div className="fp-head">
+        <div>
+          <h1 className="fp-title">Feed</h1>
+          <div className="cap">{heading} · sample data</div>
+        </div>
         <span className="feed-toggles" role="group" aria-label="Feed audience">
           {["friends", "fof"].map((m) => (
             <button key={m} type="button" className={"feed-toggle" + (mode === m ? " on" : "")} aria-pressed={mode === m} aria-label={FEED_MODE_LABEL[m]} onClick={() => toggle(m)}>{FEED_ICONS[m]}</button>
           ))}
         </span>
       </div>
-      {items.length === 0 ? <div className="cap" style={{ padding: "var(--s-3) 0" }}>Nothing to show in this view yet.</div> : items.map((it) => {
+      {items.length === 0 && <div className="cap" style={{ padding: "var(--s-5) 0" }}>Nothing to show in this view yet.</div>}
+      {items.map((it) => {
         const u = source.users[it.authorId] || {};
+        const nm = String(u.name || "Someone"), initial = nm.replace(/^Sample\s+/, "").charAt(0).toUpperCase();
+        const n = likeSeed(it.id) + (liked[it.id] ? 1 : 0);
         return (
-          <div key={it.id} className="feed-row">
-            <div className="feed-top"><span className="feed-name">{u.name || "Someone"}</span>{u.isMock && <span className="feed-mock">sample</span>}<span className="feed-meta">{DEGREE_LABEL(it)} · {agoText(it.ts)}</span></div>
-            <div className="feed-text"><span className="feed-ach">{it.achievement}</span> {it.text}</div>
+          <div key={it.id} className="fp-card">
+            <div className="fp-row">
+              <div className="fp-main">
+                <div className="fp-who">
+                  <span className="fp-avatar" aria-hidden="true">{initial}</span>
+                  <span>
+                    <span className="fp-name">{nm}{u.isMock && <span className="feed-mock">sample</span>}</span>
+                    <span className="fp-sub">{DEGREE_LABEL(it)} · {agoText(it.ts)}</span>
+                  </span>
+                </div>
+                <div className="fp-text">{it.text}</div>
+              </div>
+              <div className="fp-emblem" aria-hidden="true"><DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--accent)" pitch={3} /></div>
+            </div>
+            <button type="button" className={"fp-like" + (liked[it.id] ? " on" : "")} aria-pressed={!!liked[it.id]} onClick={() => setLiked((l) => ({ ...l, [it.id]: !l[it.id] }))}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={liked[it.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.8 6.6 4.8c2 0 3.5 1.1 4.4 2.5.9-1.4 2.4-2.5 4.4-2.5 3.6 0 5.7 3.6 4.2 7C19.5 16.4 12 21 12 21z" /></svg>
+              <span>{n}</span>
+            </button>
           </div>
         );
       })}
-      <div className="cap" style={{ marginTop: "var(--s-2)" }}>Sample data. Real friends arrive with accounts.</div>
+      <div className="fp-card fp-promo">
+        <div className="fp-promo-art" aria-hidden="true"><DotNum text="LIFT" color="var(--accent)" pitch={5} /></div>
+        <div className="fp-text">A little competition can be fun. Follow friends to track their progress.</div>
+        <button type="button" className="fp-add" onClick={() => setNote("Adding friends arrives with accounts.")}>ADD FRIENDS</button>
+        {note && <div className="cap" style={{ marginTop: "var(--s-2)" }}>{note}</div>}
+      </div>
     </div>
   );
 }
@@ -962,6 +987,7 @@ const NAV_ICON_PROPS = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "non
 function IconHome({ color, size }) { return <svg {...NAV_ICON_PROPS} width={size || NAV_ICON_PROPS.width} height={size || NAV_ICON_PROPS.height} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
 function IconDumbbell({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color} style={{ transform: "rotate(45deg)" }}><path d="M6 7v10M18 7v10" /><path d="M2 10v4M22 10v4" /><path d="M6 12h12" strokeWidth="3" /></svg>; }
 function IconChart({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 20V4" /><path d="M4 20h16" /><path d="M7 16l4-5 3 3 5-7" /></svg>; }
+function IconFeed({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.4" /><path d="M2.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5" /><path d="M15 15c.7-.4 1.4-.5 2-.5 2.5 0 4.5 1.8 4.5 4.5" /></svg>; }
 function IconBulb({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a6 6 0 00-4 10.5c.7.6 1 1.3 1 2.5h6c0-1.2.3-1.9 1-2.5A6 6 0 0012 2z" /></svg>; }
 function ClearX({ onClick, label }) {
   return (
@@ -1957,6 +1983,8 @@ export default function Home() {
     setChartFocusExercise(mergeUndo.from);
     setMergeUndo(null);
   };
+  const [exUndo, setExUndo] = useState(null);
+  const exUndoTimer = useRef(null);
   const deleteExercise = (name) => {
     const count = (entriesByExercise[name] || []).length;
     if (!confirm(`Delete "${name}" and all ${count} logged set${count === 1 ? "" : "s"}? This can't be undone.`)) return;
@@ -1965,6 +1993,15 @@ export default function Home() {
     persist({ workouts, exercises: nextExercises, entries: entries.filter((e) => e.exercise !== name) });
     setChartFocusExercise(null);
     if (recExercise === name) setRecExercise(null);
+    setXpage(null);
+    setExUndo({ name, count, prevExercises: exercises, prevEntries: entries });
+    if (exUndoTimer.current) clearTimeout(exUndoTimer.current);
+    exUndoTimer.current = setTimeout(() => setExUndo(null), 10000);
+  };
+  const undoDeleteExercise = () => {
+    if (!exUndo) return;
+    persist({ workouts, exercises: exUndo.prevExercises, entries: exUndo.prevEntries });
+    setExUndo(null);
   };
 
   // ---- Overall-section data -------------------------------------------------------------------------
@@ -2065,6 +2102,7 @@ export default function Home() {
   const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
   const [activeSection, setActiveSection] = useState("portfolio");
   const [dockVisible, setDockVisible] = useState(false);
+  const [feedOpen, setFeedOpen] = useState(false);
   const dpRef = useRef(0);
   const saveBtnRef = useRef(null);
   useEffect(() => {
@@ -2683,8 +2721,6 @@ export default function Home() {
             </div>
           </div>
 
-          <FeedCard />
-
         </div>
 
         {/* ---------------- WORKOUT (search, today's target, log) ---------------- */}
@@ -2829,7 +2865,8 @@ export default function Home() {
             <div className="warm-row">
               <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
             </div>
-            <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" />
+            <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" right={<button type="button" className="cam-btn" aria-label="Log from a photo of your notes" onClick={() => notesInputRef.current && notesInputRef.current.click()}><DotCamera /></button>} />
+            <input ref={notesInputRef} type="file" accept="image/*" hidden onChange={(e) => scanNotes(e.target.files && e.target.files[0])} />
           </div>
 
           {todaysEntries.length > 0 && (
@@ -2850,10 +2887,7 @@ export default function Home() {
               ) : (
                 <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={resetAddForm}>Cancel new exercise</button>
               )}
-              <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => notesInputRef.current && notesInputRef.current.click()}>Log from notes photo</button>
-              <input ref={notesInputRef} type="file" accept="image/*" hidden onChange={(e) => scanNotes(e.target.files && e.target.files[0])} />
             </div>
-            <button className="add-ex-link" style={{ marginBottom: 0, flexShrink: 0 }} onClick={clearForm}>Clear All</button>
           </div>
           {addingExercise && (
             <div className="card add-card">
@@ -2945,7 +2979,6 @@ export default function Home() {
                 <div className="label-sm" style={{ marginBottom: 0 }}>History · {focusHistory.length} logged</div>
                 <div style={{ display: "flex", gap: 12 }}>
                   <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-label)" }} onClick={() => setMergeOpen((v) => !v)}>Merge into…</button>
-                  <button className="add-ex-link" style={{ marginBottom: 0, fontSize: "var(--fs-label)" }} onClick={() => deleteExercise(chartFocusExercise)}>Delete</button>
                 </div>
               </div>
               {mergeUndo && (
@@ -3053,6 +3086,12 @@ export default function Home() {
         </>
       )}
 
+      {exUndo && (
+        <div className="undo-toast" role="status">
+          <span>Deleted {exUndo.name} ({exUndo.count} {exUndo.count === 1 ? "set" : "sets"})</span>
+          <button type="button" onClick={undoDeleteExercise}>Undo</button>
+        </div>
+      )}
       {undoDel && (
         <div className="undo-toast" role="status">
           <span>Set deleted</span>
@@ -3151,6 +3190,13 @@ export default function Home() {
                 )))}
               </div>
             </div>
+            {xEdit && (
+              <div className="card flat">
+                <div className="label-sm">Danger zone</div>
+                <button type="button" className="btn-danger" onClick={() => deleteExercise(xpage.exercise)}>Delete {xpage.exercise} and all its sets</button>
+                <div className="cap" style={{ marginTop: "var(--s-2)" }}>You can undo for 10 seconds after deleting.</div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3311,7 +3357,7 @@ export default function Home() {
         </>
       )}
 
-      {(restTimer || dockVisible) && loaded && (
+      {(restTimer || dockVisible) && loaded && !feedOpen && (
         <div className="dock" ref={dockRef}>
           {restTimer && (
             <div className={"rest-bar" + (restRemaining <= 0 ? " done" : "")}>
@@ -3332,17 +3378,22 @@ export default function Home() {
         </div>
       )}
 
-      <div className="bottom-nav" ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
+      {feedOpen && <FeedPage />}
+
+      <div className="bottom-nav" ref={navRef} style={{ "--i": feedOpen ? 3 : activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
-        <button className={"bottom-nav-item bottom-nav-item-main" + (activeSection === "portfolio" ? " active" : "")} onClick={() => scrollToSection("portfolio")}>
+        <button className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
           <IconHome color="currentColor" size={24} /><span>Overall</span>
         </button>
-        <button className={"bottom-nav-item" + (activeSection === "home" ? " active" : "")} onClick={() => scrollToSection("home")}>
+        <button className={"bottom-nav-item" + (!feedOpen && activeSection === "home" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("home"); }}>
           <IconBulb color="currentColor" /><span>Workout</span>
         </button>
-        <button className={"bottom-nav-item" + (activeSection === "charts" ? " active" : "")} onClick={() => scrollToSection("charts")}>
+        <button className={"bottom-nav-item" + (!feedOpen && activeSection === "charts" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("charts"); }}>
           <IconChart color="currentColor" /><span>Progress</span>
+        </button>
+        <button className={"bottom-nav-item" + (feedOpen ? " active" : "")} onClick={() => setFeedOpen(true)}>
+          <IconFeed color="currentColor" /><span>Feed</span>
         </button>
       </div>
     </div>
