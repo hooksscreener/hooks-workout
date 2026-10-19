@@ -28,7 +28,7 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
-const BUILD_TAG = "Build 14 · Oct 19";
+const BUILD_TAG = "Build 17 · Oct 19";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -463,14 +463,31 @@ function DotCamera({ size = 4, color = "currentColor" }) {
   );
 }
 
+function DotNotebook({ size = 3, color = "currentColor" }) {
+  const map = [".####.####.", "#....#....#", "#.##.#.##.#", "#....#....#", "#.#.##.#..#", "#....#....#", "#.##.#.###.", ".####.####."];
+  return (
+    <svg width={11 * size} height={8 * size} viewBox={`0 0 ${11 * size} ${8 * size}`} aria-hidden="true" fill={color}>
+      {map.flatMap((row, y) => row.split("").map((c, x) => (c === "#" ? <circle key={`${x}-${y}`} cx={x * size + size / 2} cy={y * size + size / 2} r={size * 0.38} /> : null)))}
+    </svg>
+  );
+}
+const HEART_ON = [".##...##.", "####.####", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."];
+const HEART_OFF = [".##...##.", "#..#.#..#", "#...#...#", "#.......#", ".#.....#.", "..#...#..", "...#.#...", "....#...."];
+function DotHeart({ on, size = 3 }) {
+  const map = on ? HEART_ON : HEART_OFF;
+  return (
+    <svg width={9 * size} height={8 * size} viewBox={`0 0 ${9 * size} ${8 * size}`} aria-hidden="true" fill="currentColor">
+      {map.flatMap((row, y) => row.split("").map((c, x) => (c === "#" ? <circle key={`${x}-${y}`} cx={x * size + size / 2} cy={y * size + size / 2} r={size * 0.4} /> : null)))}
+    </svg>
+  );
+}
 const likeSeed = (id) => 3 + ([...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % 38);
 const EMBLEM = { PR: "PR", Streak: "STREAK", Growth: "GROWTH", Volume: "VOLUME" };
 
 function FeedPage({ source = mockSocial }) {
   const [mode, setMode] = useState(FEED_MODES.DISCOVERY); // null = Community Discovery (default)
   const [liked, setLiked] = useState({});
-  const [note, setNote] = useState("");
-  const toggle = (m) => setMode((cur) => (cur === m ? FEED_MODES.DISCOVERY : m));
+    const toggle = (m) => setMode((cur) => (cur === m ? FEED_MODES.DISCOVERY : m));
   const items = useMemo(() => filterFeed({ ...source, mode }), [source, mode]);
   const heading = mode === "friends" ? "Friends only" : mode === "fof" ? "Friends of friends" : "Community";
   return (
@@ -507,18 +524,12 @@ function FeedPage({ source = mockSocial }) {
               <div className="fp-emblem" aria-hidden="true"><DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--accent)" pitch={3} /></div>
             </div>
             <button type="button" className={"fp-like" + (liked[it.id] ? " on" : "")} aria-pressed={!!liked[it.id]} onClick={() => setLiked((l) => ({ ...l, [it.id]: !l[it.id] }))}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={liked[it.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.8 6.6 4.8c2 0 3.5 1.1 4.4 2.5.9-1.4 2.4-2.5 4.4-2.5 3.6 0 5.7 3.6 4.2 7C19.5 16.4 12 21 12 21z" /></svg>
+              <DotHeart on={!!liked[it.id]} size={3} />
               <span>{n}</span>
             </button>
           </div>
         );
       })}
-      <div className="fp-card fp-promo">
-        <div className="fp-promo-art" aria-hidden="true"><DotNum text="LIFT" color="var(--accent)" pitch={5} /></div>
-        <div className="fp-text">A little competition can be fun. Follow friends to track their progress.</div>
-        <button type="button" className="fp-add" onClick={() => setNote("Adding friends arrives with accounts.")}>ADD FRIENDS</button>
-        {note && <div className="cap" style={{ marginTop: "var(--s-2)" }}>{note}</div>}
-      </div>
     </div>
   );
 }
@@ -1248,13 +1259,36 @@ function RadarChart({ data, rangeLabel, onTap }) {
   );
 }
 
+// Line the card's faint background dots up with the chart's own dots, so both read as one grid.
+function useGridSync(svgRef, on, pitch, ox, oy) {
+  useEffect(() => {
+    const svg = svgRef.current, card = svg && svg.closest(".card");
+    if (!on || !svg || !card || !svg.getScreenCTM) return undefined;
+    const sync = () => {
+      const m = svg.getScreenCTM(); if (!m) return;
+      const pt = svg.createSVGPoint(); pt.x = ox; pt.y = oy;
+      const q = pt.matrixTransform(m), cr = card.getBoundingClientRect(), pp = pitch * m.a;
+      const mod = (v) => ((v % pp) + pp) % pp;
+      card.style.backgroundSize = `${pp}px ${pp}px`;
+      card.style.backgroundPosition = `${mod(q.x - cr.left - card.clientLeft - pp / 2)}px ${mod(q.y - cr.top - card.clientTop - pp / 2)}px`;
+    };
+    sync();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+    if (ro) { ro.observe(card); ro.observe(svg); }
+    window.addEventListener("resize", sync);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener("resize", sync); card.style.backgroundSize = ""; card.style.backgroundPosition = ""; };
+  }, [on, pitch, ox, oy]);
+}
+
 function VolumeBarChart({ weeks, onTapBar, dots }) {
-  const W = 340, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
+  const W = 342, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
+  const svgRef = useRef(null);
+  useGridSync(svgRef, !!dots, 6, padL + 3, H - padB - 3);
   const max = Math.max(...weeks.map((w) => w.volume), 1);
   const n = weeks.length;
   const bw = (W - padL - padR) / n - 6;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
       {[0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + (1 - t) * (H - padT - padB);
         return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--text-primary)">{Math.round((max * t) / 1000)}k</text></g>;
@@ -1265,9 +1299,9 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
           {dots
-            ? (() => { const pt = 6.4, nc = Math.max(1, Math.floor(bw / pt)), nr = Math.floor(h / pt), x0 = x + (bw - nc * pt) / 2 + pt / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r="2.4" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />); if (!nr) out.push(<circle key="z" cx={x + bw / 2} cy={H - padB - 2} r="1.8" fill="var(--border)" />); return out; })()
+            ? (() => { const pt = 6, nc = 4, nr = Math.floor(h / pt), x0 = padL + i * ((W - padL - padR) / n) + pt / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r="2.3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />); if (!nr) out.push(<circle key="z" cx={x0 + 1.5 * pt} cy={H - padB - 2} r="1.8" fill="var(--border)" />); return out; })()
             : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
-          <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
+          <text x={dots ? padL + i * ((W - padL - padR) / n) + 12 : x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
     </svg>
@@ -1277,27 +1311,29 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
 function ConsistencyHeatmap({ weeks, onTap, dots }) {
   // weeks: [[{date, count, future}, ...7 days Monday to Sunday], ...]
   const cell = 20, gap = 4;
+  const svgRef = useRef(null);
+  useGridSync(svgRef, !!dots, 6, 3, 3);
   const labelW = 26, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
   const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
   const colorFor = () => "var(--accent)";
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
-    <svg viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
       {dots ? weeks.map((week, wi) => week.map((day, di) => {
         // Each day is a small square made of a 3 x 3 grid of the same tiny dots the volume bars use.
-        const pt = 6.4, x0 = wi * (cell + gap) + (cell - 2 * pt) / 2, y0 = di * (cell + gap) + (cell - 2 * pt) / 2, out = [];
-        // More sets logged means more of the 9 dots light up, filling from the bottom row up (0, 3, 6 or 9).
-        const lit = day.future ? 0 : [0, 3, 6, 9][Math.min(day.count, 3)];
+        const pt = 6, x0 = wi * (cell + gap) + pt / 2, y0 = di * (cell + gap) + pt / 2, out = [];
+        // A trained day lights all 9 dots; a rest day stays dim.
+        const lit = day.future ? 0 : day.count > 0 ? 9 : 0;
         for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
           const fromBottom = (2 - r) * 3 + c;
           out.push(day.future
             ? <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="1.2" fill="var(--border)" />
-            : <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="2.4" fill={fromBottom < lit ? "var(--accent)" : "var(--border)"} />);
+            : <circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r="2.3" fill={fromBottom < lit ? "var(--accent)" : "var(--border)"} />);
         }
         return <g key={`${wi}-${di}`}>{out}</g>;
       })) : weeks.map((week, wi) => week.map((day, di) => (
-        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={day.future || day.count === 0 ? 1 : opFor(day.count)} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
+        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={1} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
       {DAYS.map((d, di) => <text key={d} x={W - labelW + 6} y={di * (cell + gap) + cell / 2 + 3} fontSize="9" fill="var(--text-primary)">{d}</text>)}
     </svg>
@@ -1387,6 +1423,88 @@ function DotField() {
     return () => { window.removeEventListener("resize", resize); clearTimeout(timer); cancelAnimationFrame(raf); };
   }, []);
   return <canvas ref={canvasRef} className="dot-field" aria-hidden="true" />;
+}
+
+function buildDemoData() {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const plan = [
+    [0, "push", [["Bench Press", 155, 8], ["Incline Barbell Press", 115, 8], ["Barbell Shoulder Press", 85, 8]]],
+    [1, "pull", [["Deadlift", 225, 5], ["Barbell Rows", 115, 8], ["Close-Grip Lat Pulldown", 110, 10]]],
+    [3, "arms", [["Barbell Curl", 65, 10], ["Skull Crushers", 60, 10]]],
+    [4, "legsA", [["Squats", 205, 6], ["Leg Press", 320, 10], ["Romanian Deadlift", 185, 8]]],
+  ];
+  const today = todayISO(), thisWeek = weekStartISO(today), out = [];
+  for (let w = 25; w >= 0; w--) {
+    plan.forEach(([dow, wid, lifts]) => {
+      const date = shiftDate(thisWeek, -w * 7 + dow);
+      if (date > today || (wid === "legsA" && w <= 1)) return;
+      lifts.forEach(([exercise, base, reps]) => {
+        const weight = Math.round((base * (1 + (25 - w) * 0.006) - (rnd() < 0.25 ? 5 : 0)) / 5) * 5;
+        out.push({ id: `demo-${date}-${exercise}`, workoutId: wid, exercise, weight, sets: 3, reps: reps - (rnd() < 0.3 ? 1 : 0), date, isWarmup: false });
+      });
+    });
+  }
+  out.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return { workouts: DEFAULT_WORKOUTS, exercises: DEFAULT_EXERCISES, entries: out };
+}
+
+// Spotlight tutorial: dims the screen, cuts a hole around the target and types the explanation in a bubble.
+function TutorialOverlay({ steps, idx, setIdx, onEnd, waitDone }) {
+  const step = steps[idx] || steps[0];
+  const [rect, setRect] = useState(null);
+  const [shown, setShown] = useState(0);
+  const text = step.text || "";
+  useEffect(() => { if (step.before) step.before(); setRect(null); /* eslint-disable-next-line */ }, [idx]);
+  useEffect(() => {
+    let alive = true, scrolled = false;
+    const measure = () => {
+      if (!alive) return;
+      const el = step.target ? step.target() : null;
+      if (!el) { setRect(null); return; }
+      if (!scrolled) { scrolled = true; try { el.scrollIntoView({ block: "center", behavior: "auto" }); } catch (e) { /* ignore */ } }
+      const r = el.getBoundingClientRect(), vh = window.innerHeight;
+      const top = Math.max(r.top, 6), bottom = Math.min(r.bottom, vh - 6);
+      if (bottom <= top) { setRect(null); return; }
+      setRect((p) => (p && Math.abs(p.top - top) < 1 && Math.abs(p.left - r.left) < 1 && Math.abs(p.h - (bottom - top)) < 1 ? p : { top, left: r.left, w: r.width, h: bottom - top }));
+    };
+    const t0 = setTimeout(measure, 420), iv = setInterval(measure, 250);
+    return () => { alive = false; clearTimeout(t0); clearInterval(iv); };
+    // eslint-disable-next-line
+  }, [idx]);
+  useEffect(() => {
+    setShown(0);
+    const iv = setInterval(() => setShown((n) => { if (n >= text.length) { clearInterval(iv); return n; } return n + 2; }), 22);
+    return () => clearInterval(iv);
+  }, [idx, text]);
+  useEffect(() => { if (waitDone) { const t = setTimeout(() => setIdx((i) => i + 1), 350); return () => clearTimeout(t); } return undefined; }, [waitDone]);
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800, vw = typeof window !== "undefined" ? window.innerWidth : 400;
+  const pad = 6;
+  const hole = rect ? { top: rect.top - pad, left: rect.left - pad, width: rect.w + pad * 2, height: rect.h + pad * 2 } : null;
+  const below = hole ? vh - (hole.top + hole.height) : 0;
+  const bubbleStyle = !hole ? { top: "50%", transform: "translateY(-50%)" } : below >= 210 ? { top: hole.top + hole.height + 14 } : { bottom: vh - hole.top + 14 };
+  const last = idx === steps.length - 1, canNext = !step.wait;
+  const panel = (st, k) => <div key={k} className="tut-block" style={st} onClick={(e) => e.stopPropagation()} />;
+  return (
+    <div className="tut" role="dialog" aria-label="Tutorial">
+      {hole && <div className="tut-hole" style={hole} />}
+      {!hole && <div className="tut-dim" />}
+      {step.wait && hole
+        ? [panel({ top: 0, left: 0, right: 0, height: Math.max(0, hole.top) }, "t"), panel({ top: hole.top + hole.height, left: 0, right: 0, bottom: 0 }, "b"), panel({ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }, "l"), panel({ top: hole.top, left: hole.left + hole.width, right: 0, height: hole.height }, "r")]
+        : <div className="tut-block" style={{ inset: 0 }} />}
+      <div className="tut-bubble" style={bubbleStyle} onClick={() => setShown(text.length)}>
+        <div className="tut-text">{text.slice(0, shown)}<span className="tut-caret">{shown < text.length ? "▍" : ""}</span></div>
+        <div className="tut-row">
+          <span className="tut-count">{idx + 1}/{steps.length}</span>
+          <span className="tut-btns">
+            {!last && <button type="button" className="tut-btn ghost" onClick={onEnd}>Skip</button>}
+            {idx > 0 && <button type="button" className="tut-btn ghost" onClick={(e) => { e.stopPropagation(); setIdx(idx - 1); }}>Back</button>}
+            {canNext && <button type="button" className="tut-btn" onClick={(e) => { e.stopPropagation(); if (last) onEnd(); else setIdx(idx + 1); }}>{step.next || "Next"}</button>}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -1576,7 +1694,9 @@ export default function Home() {
   };
   const signOut = () => { try { localStorage.removeItem(PASSCODE_KEY); } catch (e) { /* ignore */ } window.location.reload(); };
 
+  const demoRef = useRef(false);
   const persist = async (next) => {
+    if (demoRef.current) return;
     const payload = {
       ...next,
       restDays: next.restDays !== undefined ? next.restDays : restDays,
@@ -2060,6 +2180,16 @@ export default function Home() {
     return weeks;
   }, [strengthEntries]);
 
+  const consistency = useMemo(() => {
+    const today = todayISO(), thisWeek = weekStartISO(today);
+    const weeksSet = new Set(), month = today.slice(0, 7), days = new Set();
+    strengthEntries.forEach((e) => { weeksSet.add(weekStartISO(e.date)); if (e.date.startsWith(month)) days.add(e.date); });
+    let w = thisWeek, streak = 0;
+    if (!weeksSet.has(w)) w = shiftDate(w, -7); // this week may simply not have started yet
+    while (weeksSet.has(w)) { streak++; w = shiftDate(w, -7); }
+    return { streak, month: days.size };
+  }, [strengthEntries]);
+
   const allTimeRange = useMemo(() => {
     if (!entries.length) return null;
     const dates = entries.map((e) => e.date).sort();
@@ -2079,18 +2209,58 @@ export default function Home() {
       setCanVibrate(typeof navigator.vibrate === "function" && !ios);
     } catch (e) { /* ignore */ }
   }, []);
-  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [progCleared, setProgCleared] = useState(false);
-  useEffect(() => {
-    if (!loaded || entries.length) return;
-    try { if (!localStorage.getItem("hooksWelcomeDone")) setWelcomeOpen(true); } catch (e) { /* ignore */ }
-  }, [loaded, entries.length]);
-  const closeWelcome = (goLog) => {
-    setWelcomeOpen(false);
-    try { localStorage.setItem("hooksWelcomeDone", "1"); } catch (e) { /* ignore */ }
-    if (goLog) setTimeout(() => sectionRefs.current.home && sectionRefs.current.home.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  // ---- Tutorial (runs on sample data that is never saved) ----
+  const [tutIdx, setTutIdx] = useState(null);
+  const tutSnap = useRef(null);
+  const closeAllViews = () => { setCarouselOpen(false); setXpage(null); setFeedOpen(false); setSettingsOpen(false); setAddingExercise(false); };
+  const startTutorial = () => {
+    if (demoRef.current) return;
+    tutSnap.current = { workouts, exercises, entries, restDays, tickers, progressionMode, chartFocusExercise, selectedDate };
+    demoRef.current = true;
+    const d = buildDemoData();
+    setWorkouts(d.workouts); setExercises(d.exercises); setEntries(d.entries); setRestDays([]); setTickers({});
+    setChartFocusExercise("Bench Press"); setProgCleared(false);
+    closeAllViews(); window.scrollTo(0, 0);
+    setTutIdx(0);
   };
-
+  const endTutorial = () => {
+    const sn = tutSnap.current;
+    closeAllViews();
+    if (sn) { setWorkouts(sn.workouts); setExercises(sn.exercises); setEntries(sn.entries); setRestDays(sn.restDays); setTickers(sn.tickers); setProgressionMode(sn.progressionMode); setChartFocusExercise(sn.chartFocusExercise); setProgCleared(!sn.chartFocusExercise); setSelectedDate(sn.selectedDate); }
+    demoRef.current = false; tutSnap.current = null;
+    setTutIdx(null);
+    try { localStorage.setItem("hooksTutorialDone", "1"); } catch (e) { /* ignore */ }
+    window.scrollTo(0, 0);
+  };
+  useEffect(() => {
+    if (!loaded || entries.length || demoRef.current) return;
+    try { if (!localStorage.getItem("hooksTutorialDone")) setTimeout(startTutorial, 400); } catch (e) { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, entries.length]);
+  const qs = (sel) => () => document.querySelector(sel);
+  const cardWith = (txt) => () => Array.from(document.querySelectorAll("[data-tut=charts] .card")).find((c) => c.textContent.includes(txt)) || null;
+  const tutSteps = [
+    { text: `${APP_TITLE} · Gym Analytics. Track every lift. Never stall.`, before: () => { closeAllViews(); window.scrollTo(0, 0); }, next: "Start" },
+    { text: "Pull down to see a ticker for each exercise with your estimated one-rep max.", before: () => { closeAllViews(); window.scrollTo(0, 0); setTimeout(() => setCarouselOpen(true), 30); }, target: qs(".carousel") },
+    { text: "Tap a ticker to open it.", before: () => { setXpage(null); setCarouselOpen(true); window.scrollTo(0, 0); }, target: qs(".carousel-card:not(.all)"), wait: () => !!xpage },
+    { text: "Your one-rep max, estimated five-rep max, average weight, total volume and sessions logged.", before: () => { setCarouselOpen(false); setXpage((x) => x || { exercise: "Bench Press", date: todayISO(), ytd: true }); }, target: qs(".stats-block") },
+    { text: "Switch the time range to see your strength over 1, 3 or 6 months and more.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, target: qs(".overall-screen .range-tabs") },
+    { text: "This is your average strength over that period. Tap 30, 90 or 365 days to see if you are beating your own average.", before: () => { closeAllViews(); }, target: qs(".overall-screen .pills-sub") },
+    { text: "Log every set to make sure you keep progressively overloading. There is no point lifting if you are not improving.", before: () => { closeAllViews(); }, target: qs(".log-set-row") },
+    { text: "Lifter's Digest: your latest workout, what is improving, and what needs work.", before: () => { closeAllViews(); }, target: qs(".digest-card2") },
+    { text: "Exercises belong to workout days. Orange marks the day you have not hit in a while.", before: () => { closeAllViews(); }, target: qs(".due-pill") },
+    { text: "Search an exercise, enter weight, reps and sets. Log one set at a time or all at once.", before: () => { closeAllViews(); }, target: qs(".card-tabbed") },
+    { text: "Add a new exercise with a name, a ticker, the brand and a workout day. The same machine feels different across brands, so track them separately.", before: () => { closeAllViews(); }, target: qs("[data-tut=addex]") },
+    { text: "Photograph your handwritten notes and the app imports those sets, so your history comes with you.", before: () => { closeAllViews(); }, target: qs(".cam-btn") },
+    { text: "Pick an exercise to see if you are improving. Top weight is your heaviest set. Estimated 1RM is what you could lift once, calculated from your weight and reps.", before: () => { closeAllViews(); }, target: () => { const sv = Array.from(document.querySelectorAll("[data-tut=charts] svg")).find((x) => x.getBoundingClientRect().height > 120); return sv ? sv.parentElement : null; } },
+    { text: "Every logged set is listed below the graph.", before: () => { closeAllViews(); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
+    { text: "Strength growth shows which muscle groups are progressing most.", before: () => { closeAllViews(); }, target: cardWith("Strength growth") },
+    { text: "Weekly volume is weight × reps × sets for the last 10 weeks.", before: () => { closeAllViews(); }, target: cardWith("Weekly training volume") },
+    { text: "Consistency shows which days you show up. A lit square is a day you trained.", before: () => { closeAllViews(); }, target: cardWith("Training consistency") },
+    { text: "The feed shows how friends and friends of friends are doing. Follow your friends to track their progress.", before: () => { closeAllViews(); setFeedOpen(true); }, target: qs(".feedpage .fp-card") },
+    { text: "That is it. You can replay this anytime from Settings.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, next: "Done" },
+  ];
   useEffect(() => {
     if (!loaded || chartFocusExercise || progCleared || !entries.length) return;
     const latest = entries.reduce((a, b) => (b.date > a.date ? b : a), entries[0]);
@@ -2237,7 +2407,7 @@ export default function Home() {
   const [aiDigest, setAiDigest] = useState(null);
   useEffect(() => {
     setAiDigest(null);
-    if (!digestStats || !passcode || !settings.ai) return undefined;
+    if (!digestStats || !passcode || !settings.ai || demoRef.current) return undefined;
     let cancelled = false;
     const key = `hooksDigest2:${todayISO()}:${digestSig}`;
     try { const c = localStorage.getItem(key); if (c) { setAiDigest(JSON.parse(c)); return undefined; } } catch (e) { /* ignore */ }
@@ -2616,7 +2786,7 @@ export default function Home() {
     <DotField />
     <div className="wrap">
       <div className="status-fade" aria-hidden="true" />
-      <div className="top-bar"><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
+      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
 
@@ -2865,7 +3035,7 @@ export default function Home() {
             <div className="warm-row">
               <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
             </div>
-            <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" right={<button type="button" className="cam-btn" aria-label="Log from a photo of your notes" onClick={() => notesInputRef.current && notesInputRef.current.click()}><DotCamera /></button>} />
+            <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" right={<button type="button" className="cam-btn" aria-label="Import a photo of your handwritten notes" onClick={() => notesInputRef.current && notesInputRef.current.click()}><DotNotebook size={3} /></button>} />
             <input ref={notesInputRef} type="file" accept="image/*" hidden onChange={(e) => scanNotes(e.target.files && e.target.files[0])} />
           </div>
 
@@ -2883,7 +3053,7 @@ export default function Home() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
             <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
               {!addingExercise ? (
-                <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
+                <button className="add-ex-link" style={{ marginBottom: 0 }} data-tut="addex" onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
               ) : (
                 <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={resetAddForm}>Cancel new exercise</button>
               )}
@@ -2918,7 +3088,7 @@ export default function Home() {
         </div>
 
         {/* ---------------- PROGRESS ---------------- */}
-        <div ref={(el) => (sectionRefs.current.charts = el)} className="section-block">
+        <div ref={(el) => (sectionRefs.current.charts = el)} className="section-block" data-tut="charts">
           <div className="label-sm" style={{ marginBottom: 12 }}>Progress</div>
           {(() => {
             const withData = allExerciseNames.filter((ex) => (entriesByExercise[ex] || []).length > 0);
@@ -3033,7 +3203,11 @@ export default function Home() {
                 {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
               </div>
             )}
-            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). More lit dots mean more sets logged that day (3, 6 or 9). Tap the chart for the span." />
+            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). A lit square means you trained that day. Tap the chart for the span." />
+            <div className="cons-stats">
+              <div className="st-cell"><div className="st-label">Week streak</div><div className="st-value">{consistency.streak}</div></div>
+              <div className="st-cell"><div className="st-label">Days this month</div><div className="st-value">{consistency.month}</div></div>
+            </div>
           </div>
         </div>
 
@@ -3253,6 +3427,7 @@ export default function Home() {
               <button className="close-btn" onClick={() => setSettingsOpen(false)} aria-label="Close settings">✕</button>
             </div>
 
+            <button type="button" className="add-ex-link" style={{ marginBottom: 12 }} onClick={() => { setSettingsOpen(false); setTimeout(startTutorial, 250); }}>Replay tutorial</button>
             <div className="label-sm">Appearance</div>
             <div className="pills">
               {[["dark", "Dark"], ["light", "Light"], ["system", "Match phone"]].map(([k, label]) => (
@@ -3341,20 +3516,8 @@ export default function Home() {
         </>
       )}
 
-      {welcomeOpen && (
-        <>
-          <div className="sheet-backdrop" onClick={() => closeWelcome(false)} />
-          <div className="sheet" role="dialog" aria-label="Welcome">
-            <div className="sheet-head">
-              <span className="sheet-title">Welcome</span>
-            </div>
-            <div className="welcome-step"><b>1.</b> Search an exercise, enter weight and reps, and log a set. A rest timer starts on its own.</div>
-            <div className="welcome-step"><b>2.</b> Overall tracks your Strength Index like a portfolio. After a couple of weeks it fills in.</div>
-            <div className="welcome-step"><b>3.</b> Lifter's Digest tells you what you hit last, what is improving or slipping, and which day is due.</div>
-            <div className="welcome-step muted">Tip: add this to your Home Screen from the Share menu so it opens like an app. The gear up top has themes, sounds and the AI digest switch.</div>
-            <button className="btn-iron save-btn" style={{ marginTop: 12 }} onClick={() => closeWelcome(true)}>Log my first set</button>
-          </div>
-        </>
+      {tutIdx !== null && (
+        <TutorialOverlay steps={tutSteps} idx={tutIdx} setIdx={setTutIdx} onEnd={endTutorial} waitDone={!!(tutSteps[tutIdx] && tutSteps[tutIdx].wait && tutSteps[tutIdx].wait())} />
       )}
 
       {(restTimer || dockVisible) && loaded && !feedOpen && (
