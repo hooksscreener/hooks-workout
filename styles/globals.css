@@ -534,3 +534,6 @@ svg text{font-family:var(--font-num);}
 .del-btn.del-x:active{color:var(--accent);opacity:.7;}
 .today-item .num{white-space:nowrap;}
 .today-item .del-btn{min-width:34px;}
+/* Tutorial: the overlay itself must not swallow taps, only its panels and bubble do, so the spotlighted hole is tappable. */
+.tut{pointer-events:none;}
+.tut-block,.tut-dim,.tut-bubble{pointer-events:auto;}
