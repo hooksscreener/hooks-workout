@@ -29,7 +29,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 25 · Nov 10";
+const BUILD_TAG = "Build 27 · Nov 10";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -882,7 +882,7 @@ const HONEY_COLORS = [
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: false, gl: "ios", unit: "lbs", dotNums: true };
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: true, gl: "ios", unit: "lbs", dotNums: true };
 const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
 const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
@@ -1469,7 +1469,7 @@ function TutorialOverlay({ steps, idx, setIdx, onEnd, waitDone }) {
       if (!el) { setRect(null); return; }
       if (!scrolled) { scrolled = true; try { el.scrollIntoView({ block: "center", behavior: "auto" }); } catch (e) { /* ignore */ } }
       const r = el.getBoundingClientRect(), vh = window.innerHeight;
-      const top = Math.max(r.top, 6), bottom = Math.min(r.bottom, vh - 6);
+      const top = Math.max(r.top, 6), bottom = Math.min(r.bottom, vh - 6, step.maxH ? Math.max(r.top, 6) + step.maxH : 1e9);
       if (bottom <= top) { setRect(null); return; }
       setRect((p) => (p && Math.abs(p.top - top) < 1 && Math.abs(p.left - r.left) < 1 && Math.abs(p.h - (bottom - top)) < 1 ? p : { top, left: r.left, w: r.width, h: bottom - top }));
     };
@@ -1645,7 +1645,7 @@ export default function Home() {
 
   // ---- Look & feel: dark / light / system and one accent color, remembered on this device ----------
   useEffect(() => {
-    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw), accent: DEFAULT_SETTINGS.accent, fontText: DEFAULT_SETTINGS.fontText, fontNum: DEFAULT_SETTINGS.fontNum, glass: false, gl: "ios", dotNums: true }); } catch (e) { /* ignore */ }
+    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw), glass: true }); } catch (e) { /* ignore */ }
   }, []);
   useIsoLayoutEffect(() => {
     const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
@@ -2310,6 +2310,7 @@ export default function Home() {
   const endTutorial = () => {
     const sn = tutSnap.current;
     closeAllViews();
+    setAddingExercise(false);
     if (sn) { setWorkouts(sn.workouts); setExercises(sn.exercises); setEntries(sn.entries); setRestDays(sn.restDays); setTickers(sn.tickers); setExMeta(sn.exMeta || {}); setProgressionMode(sn.progressionMode); setChartFocusExercise(sn.chartFocusExercise); setProgCleared(!sn.chartFocusExercise); setSelectedDate(sn.selectedDate); }
     demoRef.current = false; tutSnap.current = null;
     setTutIdx(null);
@@ -2324,25 +2325,25 @@ export default function Home() {
   const qs = (sel) => () => document.querySelector(sel);
   const cardWith = (txt) => () => Array.from(document.querySelectorAll("[data-tut=charts] .card")).find((c) => c.textContent.includes(txt)) || null;
   const tutSteps = [
-    { text: `${APP_TITLE} · Gym Analytics. Track every lift. Never stall.`, before: () => { closeAllViews(); window.scrollTo(0, 0); }, next: "Start" },
-    { text: "Tap Exercises, or pull down, to see each exercise with your estimated max.", before: () => { closeAllViews(); window.scrollTo(0, 0); setTimeout(() => setCarouselOpen(true), 30); }, target: qs(".carousel") },
+    { text: `${APP_TITLE} · Gym Analytics. Track every lift. Never stall.`, before: () => { closeAllViews(); setAddingExercise(false); window.scrollTo(0, 0); }, next: "Start" },
+    { text: "Tap Exercises, or pull down, to see each exercise with your estimated max.", before: () => { closeAllViews(); setAddingExercise(false); window.scrollTo(0, 0); setTimeout(() => setCarouselOpen(true), 30); }, target: qs(".carousel") },
     { text: "Tap a ticker to open it.", before: () => { setXpage(null); setCarouselOpen(true); window.scrollTo(0, 0); }, target: qs(".carousel-card:not(.all)"), wait: () => !!xpage },
     { text: "Your one-rep max, estimated five-rep max, average weight, total volume and sessions logged.", before: () => { setCarouselOpen(false); setXpage((x) => x || { exercise: "Bench Press", date: todayISO(), ytd: true }); }, target: qs(".stats-block") },
-    { text: "Switch the time range to see your strength over 1, 3 or 6 months and more.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, target: qs(".overall-screen .range-tabs") },
-    { text: "This is your average strength over that period. Tap 30, 90 or 365 days to see if you are beating your own average.", before: () => { closeAllViews(); setCompareOpen(true); }, target: qs(".overall-screen .pills-sub") },
-    { text: "Log every set to make sure you keep progressively overloading. There is no point lifting if you are not improving.", before: () => { closeAllViews(); }, target: qs(".log-set-row") },
-    { text: "Lifter's Digest: your latest workout, what is improving, and what needs work.", before: () => { closeAllViews(); }, target: qs(".digest-card2") },
-    { text: "Exercises belong to workout days. Orange marks the day you have not hit in a while.", before: () => { closeAllViews(); }, target: qs(".due-pill") },
-    { text: "Search an exercise, enter weight, reps and sets. Log one set at a time or all at once.", before: () => { closeAllViews(); }, target: qs(".card-tabbed") },
-    { text: "Add a new exercise with a name, a ticker, the brand and a workout day. The brand is just a label, so the same lift on a different machine stays on one progress line.", before: () => { closeAllViews(); }, target: qs("[data-tut=addex]") },
-    { text: "Photograph your handwritten notes and the app imports those sets, so your history comes with you.", before: () => { closeAllViews(); }, target: qs(".cam-btn") },
-    { text: "Pick an exercise to see if you are improving. Top weight is your heaviest set. Estimated 1RM is what you could lift once, calculated from your weight and reps.", before: () => { closeAllViews(); }, target: () => { const sv = Array.from(document.querySelectorAll("[data-tut=charts] svg")).find((x) => x.getBoundingClientRect().height > 120); return sv ? sv.parentElement : null; } },
-    { text: "Every logged set is listed below the graph. Tap one to reveal Delete.", before: () => { closeAllViews(); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
-    { text: "Strength growth shows which muscle groups are progressing most.", before: () => { closeAllViews(); }, target: cardWith("Strength growth") },
-    { text: "Weekly volume is weight × reps × sets for the last 10 weeks.", before: () => { closeAllViews(); }, target: cardWith("Weekly training volume") },
-    { text: "Consistency shows which days you show up. A lit square is a day you trained.", before: () => { closeAllViews(); }, target: cardWith("Training consistency") },
-    { text: "Social is the feed, opened with this button. It shows how friends and friends of friends are doing. Follow your friends to track their progress.", before: () => { closeAllViews(); setFeedOpen(true); }, target: qs(".feed-fab-wrap") },
-    { text: "That is it. To replay this tutorial, tap the gear at the top of the page, then Replay tutorial.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, target: qs(".gear-btn"), next: "Done" },
+    { text: "Switch the time range to see your strength over 1, 3 or 6 months and more.", before: () => { closeAllViews(); setAddingExercise(false); window.scrollTo(0, 0); }, target: qs(".overall-screen .range-tabs") },
+    { text: "This is your average strength over that period. Tap 30, 90 or 365 days to see if you are beating your own average.", before: () => { closeAllViews(); setAddingExercise(false); setCompareOpen(true); }, target: qs(".overall-screen .pills-sub") },
+    { text: "Log every set to make sure you keep progressively overloading. There is no point lifting if you are not improving.", before: () => { closeAllViews(); setAddingExercise(false); }, target: qs(".log-set-row") },
+    { text: "Lifter's Digest: your latest workout, what is improving, and what needs work.", before: () => { closeAllViews(); setAddingExercise(false); }, target: qs(".digest-card2") },
+    { text: "Exercises belong to workout days. Orange marks the day you have not hit in a while.", before: () => { closeAllViews(); setAddingExercise(false); }, target: qs(".due-pill") },
+    { text: "Search an exercise, enter weight, reps and sets. Log one set at a time or all at once.", before: () => { closeAllViews(); setAddingExercise(false); }, target: qs(".card-tabbed") },
+    { text: "Add a new exercise. Type its name, set a ticker, and add the machine brand. Choose one side or both, and the workout days. Or tap the camera to photograph the machine and add it in seconds.", before: () => { closeAllViews(); setAddingExercise(true); }, target: qs(".add-card"), maxH: 395 },
+    { text: "Photograph your handwritten notes and the app imports those sets, so your history comes with you.", before: () => { closeAllViews(); setAddingExercise(false); }, target: qs(".cam-btn") },
+    { text: "Pick an exercise to see if you are improving. Top weight is your heaviest set. Estimated 1RM is what you could lift once, calculated from your weight and reps.", before: () => { closeAllViews(); setAddingExercise(false); }, target: () => { const sv = Array.from(document.querySelectorAll("[data-tut=charts] svg")).find((x) => x.getBoundingClientRect().height > 120); return sv ? sv.parentElement : null; } },
+    { text: "Every logged set is listed below the graph. Tap one to delete.", before: () => { closeAllViews(); setAddingExercise(false); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
+    { text: "Strength growth shows which muscle groups are progressing most.", before: () => { closeAllViews(); setAddingExercise(false); }, target: cardWith("Strength growth") },
+    { text: "Weekly volume is weight × reps × sets for the last 10 weeks.", before: () => { closeAllViews(); setAddingExercise(false); }, target: cardWith("Weekly training volume") },
+    { text: "Consistency shows which days you show up. A lit square is a day you trained.", before: () => { closeAllViews(); setAddingExercise(false); }, target: cardWith("Training consistency") },
+    { text: "Social is the feed, opened with this button. It shows how friends and friends of friends are doing. Follow your friends to track their progress.", before: () => { closeAllViews(); setAddingExercise(false); setFeedOpen(true); }, target: qs(".feed-fab-wrap") },
+    { text: "That is it. To replay this tutorial, tap the gear, then select Replay tutorial at the top of the Settings page.", before: () => { closeAllViews(); setAddingExercise(false); window.scrollTo(0, 0); }, target: qs(".gear-btn"), next: "Done" },
   ];
   useEffect(() => {
     if (!loaded || chartFocusExercise || progCleared || !entries.length) return;
