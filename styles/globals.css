@@ -504,12 +504,15 @@ svg text{font-family:var(--font-num);}
 .tut-btn.ghost{background:none;color:var(--text-secondary);border-color:var(--border);}
 
 /* ---- Round 18: Feed as its own circle ---- */
-.feed-fab{position:fixed;right:var(--s-3);bottom:calc(var(--tabbar-h) + var(--s-3));z-index:41;width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;padding:0;}
+.feed-fab-wrap{position:fixed;right:var(--s-3);bottom:calc(var(--tabbar-h) + var(--s-2));z-index:41;display:flex;flex-direction:column;align-items:center;gap:3px;padding:2px 4px;}
+.feed-fab-label{font-size:.625rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary);line-height:1;}
+.feed-fab{position:relative;width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;padding:0;}
 .feed-fab.on{color:var(--text-primary);border-color:var(--accent);}
 .feed-fab svg{width:24px;height:24px;}
 .bottom-nav.feed-on .nav-lens{opacity:0;}
 [data-nav="glass"] .bottom-nav{left:var(--s-4);transform:none;width:min(calc(100% - 32px - 64px), 340px);}
-[data-nav="glass"] .feed-fab{right:var(--s-4);bottom:calc(var(--s-3) + env(safe-area-inset-bottom) * 0.6);width:64px;height:64px;background:var(--glass);border:1px solid var(--glass-border);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);box-shadow:0 8px 28px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.12);}
+[data-nav="glass"] .feed-fab-wrap{right:var(--s-3);bottom:calc(var(--s-2) + env(safe-area-inset-bottom) * 0.6);}
+[data-nav="glass"] .feed-fab{width:64px;height:64px;background:var(--glass);border:1px solid var(--glass-border);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);box-shadow:0 8px 28px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.12);}
 [data-nav="glass"] .feed-fab.on{background:var(--lens);border-color:var(--lens-border);}
 
 /* ---- Round 20: simpler Overall screen ---- */

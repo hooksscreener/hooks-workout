@@ -29,7 +29,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 23 · Nov 10";
+const BUILD_TAG = "Build 25 · Nov 10";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -227,10 +227,12 @@ function SwipeRow({ onEdit, onDelete, children }) {
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
   const st = useRef(null);
+  const moved = useRef(false);
   const REVEAL = 88, FULL = 150;
   const down = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (e.clientX < 20) { st.current = null; return; } // leave the screen edge to the iOS back gesture
+    moved.current = false;
     st.current = { x: e.clientX, y: e.clientY, mode: null, base: dx };
   };
   const move = (e) => {
@@ -238,7 +240,7 @@ function SwipeRow({ onEdit, onDelete, children }) {
     if (!s0) return;
     const ddx = e.clientX - s0.x, ddy = e.clientY - s0.y;
     if (!s0.mode) {
-      if (Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) { s0.mode = "swipe"; setDragging(true); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
+      if (Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) { s0.mode = "swipe"; moved.current = true; setDragging(true); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
       else if (Math.abs(ddy) > 8) { s0.mode = "scroll"; return; }
       else return;
     }
@@ -264,7 +266,8 @@ function SwipeRow({ onEdit, onDelete, children }) {
       </div>
       <div className={"swipe-body" + (dragging ? " dragging" : "")} style={{ transform: `translateX(${dx}px)` }}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}
-        onClickCapture={(e) => { if (dx !== 0) { e.stopPropagation(); e.preventDefault(); setDx(0); } }}>
+        onClickCapture={(e) => { if (dx !== 0) { e.stopPropagation(); e.preventDefault(); setDx(0); } }}
+        onClick={(e) => { if (moved.current || dx !== 0 || e.defaultPrevented) return; if (e.target.closest && e.target.closest("button")) return; setDx(-REVEAL); }}>
         {children}
       </div>
     </div>
@@ -1116,6 +1119,7 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
     if (!cv || n < 2) return;
     const ctx = setupCanvas(cv);
     ctx.fillStyle = resolveColor(color);
+    const li = document.documentElement.getAttribute("data-theme") === "light";
     for (let gx = 1.6; gx < W; gx += DOT_GAP) {
       const ly = lineYAt(gx);
       for (let gy = 1.6; gy < H; gy += DOT_GAP) {
@@ -1123,8 +1127,8 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
         if (gy > revealRef.current * H) break; // start-up: the dots come in from the top, row by row
         const a = fadeAt(gy);
         if (a < 0.02) continue;
-        ctx.globalAlpha = a;
-        ctx.beginPath(); ctx.arc(gx, gy, 0.9, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = li ? Math.min(1, a * 1.8) : a;
+        ctx.beginPath(); ctx.arc(gx, gy, li ? 1.15 : 0.9, 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.globalAlpha = 1;
@@ -1641,7 +1645,7 @@ export default function Home() {
 
   // ---- Look & feel: dark / light / system and one accent color, remembered on this device ----------
   useEffect(() => {
-    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) }); } catch (e) { /* ignore */ }
+    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw), accent: DEFAULT_SETTINGS.accent, fontText: DEFAULT_SETTINGS.fontText, fontNum: DEFAULT_SETTINGS.fontNum, glass: false, gl: "ios", dotNums: true }); } catch (e) { /* ignore */ }
   }, []);
   useIsoLayoutEffect(() => {
     const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
@@ -2333,12 +2337,12 @@ export default function Home() {
     { text: "Add a new exercise with a name, a ticker, the brand and a workout day. The brand is just a label, so the same lift on a different machine stays on one progress line.", before: () => { closeAllViews(); }, target: qs("[data-tut=addex]") },
     { text: "Photograph your handwritten notes and the app imports those sets, so your history comes with you.", before: () => { closeAllViews(); }, target: qs(".cam-btn") },
     { text: "Pick an exercise to see if you are improving. Top weight is your heaviest set. Estimated 1RM is what you could lift once, calculated from your weight and reps.", before: () => { closeAllViews(); }, target: () => { const sv = Array.from(document.querySelectorAll("[data-tut=charts] svg")).find((x) => x.getBoundingClientRect().height > 120); return sv ? sv.parentElement : null; } },
-    { text: "Every logged set is listed below the graph.", before: () => { closeAllViews(); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
+    { text: "Every logged set is listed below the graph. Tap one to reveal Delete.", before: () => { closeAllViews(); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
     { text: "Strength growth shows which muscle groups are progressing most.", before: () => { closeAllViews(); }, target: cardWith("Strength growth") },
     { text: "Weekly volume is weight × reps × sets for the last 10 weeks.", before: () => { closeAllViews(); }, target: cardWith("Weekly training volume") },
     { text: "Consistency shows which days you show up. A lit square is a day you trained.", before: () => { closeAllViews(); }, target: cardWith("Training consistency") },
-    { text: "The feed shows how friends and friends of friends are doing. Follow your friends to track their progress.", before: () => { closeAllViews(); setFeedOpen(true); }, target: qs(".feedpage .fp-card") },
-    { text: "That is it. You can replay this anytime from Settings.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, next: "Done" },
+    { text: "Social is the feed, opened with this button. It shows how friends and friends of friends are doing. Follow your friends to track their progress.", before: () => { closeAllViews(); setFeedOpen(true); }, target: qs(".feed-fab-wrap") },
+    { text: "That is it. To replay this tutorial, tap the gear at the top of the page, then Replay tutorial.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, target: qs(".gear-btn"), next: "Done" },
   ];
   useEffect(() => {
     if (!loaded || chartFocusExercise || progCleared || !entries.length) return;
@@ -2819,7 +2823,7 @@ export default function Home() {
 
   const repsText = (low, high) => (low === high ? `${low}` : `${low}–${high}`);
   const focusHistory = chartFocusExercise ? (entriesByExercise[chartFocusExercise] || []) : [];
-  const shownHistory = historyAll ? focusHistory : focusHistory.slice(0, 10);
+  const shownHistory = historyAll ? focusHistory : focusHistory.slice(0, demoRef.current ? 4 : 10);
   const mergeCandidates = chartFocusExercise ? allExerciseNames.filter((n) => n !== chartFocusExercise && (entriesByExercise[n] || []).length > 0) : [];
   const maWords = { "30": "30-day", "90": "90-day", "365": "1-year" };
 
@@ -3327,52 +3331,6 @@ export default function Home() {
           </div>
         </div>
 
-        <div ref={(el) => (sectionRefs.current.import = el)} className="section-block">
-        <>
-          <div className="label-sm" style={{ marginBottom: 12 }}>Import &amp; Backup</div>
-          <div className="card">
-            <div className="label-sm">One-time bulk import</div>
-            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
-              Loads {IMPORT_DATA.length} sets across {new Set(IMPORT_DATA.map((d) => d.exercise)).size} exercises from your written log, dated Aug 2025 – Aug 2026. New exercise names get added to the right workout automatically.
-            </div>
-            <button className="btn-iron save-btn" onClick={runImport} disabled={alreadyImported} style={{ opacity: alreadyImported ? 0.5 : 1, cursor: alreadyImported ? "default" : "pointer" }}>
-              {alreadyImported ? "Already Imported" : `Import ${IMPORT_DATA.length} Sets`}
-            </button>
-          </div>
-          <div className="card">
-            <div className="label-sm">Couldn't import automatically</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {IMPORT_SKIPPED.map((s, i) => <div key={i} style={{ fontSize: "var(--fs-label)", color: "var(--text-secondary)", lineHeight: 1.5 }}>• {s}</div>)}
-            </div>
-          </div>
-          <div className="card">
-            <div className="label-sm">Incline Bench history</div>
-            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
-              Loads {INCLINE_IMPORT_DATA.length} sets, Sep 2025 – Aug 2026. Reps weren't recorded for most of these — assumed 6 reps × 3 sets throughout, except 1/19 which was noted as 2 reps. Dumbbell sets file separately under "Incline Bench (DB)".
-            </div>
-            <button className="btn-iron save-btn" onClick={runInclineImport} disabled={alreadyImportedIncline} style={{ opacity: alreadyImportedIncline ? 0.5 : 1, cursor: alreadyImportedIncline ? "default" : "pointer" }}>
-              {alreadyImportedIncline ? "Already Imported" : `Import ${INCLINE_IMPORT_DATA.length} Sets`}
-            </button>
-          </div>
-          <div className="card">
-            <div className="label-sm">Full backup</div>
-            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
-              Downloads everything — workouts, exercises, every logged set — as a JSON file. Keep this somewhere safe (email it to yourself, save it to Drive/iCloud). If your database ever got wiped, this is what you'd restore from.
-            </div>
-            <button className="btn-iron save-btn" onClick={exportJSON}>Download JSON Backup</button>
-          </div>
-          <div className="card">
-            <div className="label-sm">For spreadsheets / your own charts</div>
-            <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
-              One row per logged set — date, workout, exercise, weight, sets, reps, and estimated 1RM. Opens straight into Excel, Google Sheets, or Numbers — pivot it, chart it, slice it however you want outside the app.
-            </div>
-            <button className="btn-iron save-btn" onClick={exportCSV}>Download CSV</button>
-          </div>
-          <div className="chart-note">
-            No auto-email yet — that needs a mail-sending service wired in (Resend is the simplest option, free tier covers this easily). Downloading and attaching it to an email yourself takes 10 seconds; say the word if you want the automatic version built in.
-          </div>
-        </>
-        </div>
         </>
       )}
 
@@ -3589,43 +3547,6 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="label-sm" style={{ marginTop: 4, marginBottom: 0 }}>Accent color</div>
-            <HoneyPicker value={settings.accent} onPick={(c) => { updateSettings({ accent: c }); setHexDraft(""); }} />
-            <div className="hex-row">
-              <input value={hexDraft} onChange={(e) => setHexDraft(e.target.value)} placeholder="#ff6600" maxLength={7} aria-label="Hex color" />
-              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft.trim())) { updateSettings({ accent: "#" + hexDraft.trim().replace("#", "").toLowerCase() }); setHexDraft(""); } }}>Use</button>
-              <button className="pill" style={{ flex: "0 0 auto", padding: "8px 12px" }} onClick={() => { updateSettings({ accent: "#ff6600" }); setHexDraft(""); }}>Reset</button>
-            </div>
-
-            <div className="label-sm" style={{ marginTop: 16 }}>Fonts</div>
-            <div className="select-wrap" style={{ marginBottom: 8 }}>
-              <select className="scope" value={settings.fontText} onChange={(e) => updateSettings({ fontText: e.target.value })} aria-label="Text font">
-                {TEXT_FONTS.map(([k, n]) => <option key={k} value={k}>Text: {n}</option>)}
-              </select>
-            </div>
-            <div className="select-wrap">
-              <select className="scope" value={settings.fontNum} onChange={(e) => updateSettings({ fontNum: e.target.value })} aria-label="Numbers and labels font">
-                {NUM_FONTS.map(([k, n]) => <option key={k} value={k}>Numbers and labels: {n}</option>)}
-              </select>
-            </div>
-
-            <div className="label-sm" style={{ marginTop: 16 }}>Tab bar</div>
-            <div className="pills">
-              {[[false, "Solid"], [true, "Glass"]].map(([k, label]) => (
-                <button key={label} className={"pill" + (!!settings.glass === k ? " active" : "")} onClick={() => updateSettings({ glass: k })}>{label}</button>
-              ))}
-            </div>
-
-            <label className="toggle-row" style={{ marginTop: 8 }}><span>Dot-matrix numbers</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.dotNums !== false} onChange={(e) => updateSettings({ dotNums: e.target.checked })} /></label>
-
-            <div className="label-sm" style={{ marginTop: 16 }}>Gains and losses</div>
-            <div className="gl-grid">
-              {[["ios", "iOS", "#34C759", "#FF453A"], ["mint", "Mint", "#00D68F", "#FF5C5C"], ["emerald", "Emerald", "#2ECC71", "#FF3B5C"], ["teal", "Teal", "#1DD1A1", "#FF6B81"], ["lime", "Lime", "#7ED957", "#FF4D4D"], ["bluorange", "Blue / orange", "#4DA3FF", "#FFA03A"]].map(([k, label, g, l]) => (
-                <button key={k} type="button" className={"gl-opt" + ((settings.gl || "ios") === k ? " on" : "")} onClick={() => updateSettings({ gl: k })} aria-pressed={(settings.gl || "ios") === k}>
-                  <span className="gl-dots"><i style={{ background: g }} /><i style={{ background: l }} /></span>{label}
-                </button>
-              ))}
-            </div>
 
             <div className="label-sm" style={{ marginTop: 16 }}>Lifter's Digest</div>
             <label className="toggle-row"><span>AI digest (more detail and the likely why)</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.ai} onChange={(e) => updateSettings({ ai: e.target.checked })} /></label>
@@ -3661,9 +3582,11 @@ export default function Home() {
               </div>
             )}
 
-            <div className="label-sm" style={{ marginTop: 16 }}>Data</div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Your data</div>
+            <div className="helper" style={{ marginBottom: 8 }}>CSV opens in Excel, Sheets or Numbers. The JSON backup is a full copy of everything. Keep it somewhere safe.</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={() => { setSettingsOpen(false); setTimeout(() => scrollToSection("import"), 50); }}>Import &amp; backup</button>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={exportCSV}>Download CSV</button>
+              <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={exportJSON}>Download JSON backup</button>
               <button className="pill" style={{ flex: "1 1 auto", padding: "8px 12px" }} onClick={signOut}>Sign out{me ? ` (${me.name})` : ""}</button>
             </div>
           </div>
@@ -3696,7 +3619,7 @@ export default function Home() {
       )}
 
       {feedOpen && <FeedPage />}
-      <button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><IconFeed color="currentColor" /></button>
+      <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><IconFeed color="currentColor" /></button><span className="feed-fab-label">Social</span></div>
 
       <div className={"bottom-nav" + (feedOpen ? " feed-on" : "")} ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
