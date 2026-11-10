@@ -28,7 +28,8 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
-const BUILD_TAG = "Build 17 · Oct 19";
+const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
+const BUILD_TAG = "Build 22 · Nov 10";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 
@@ -568,8 +569,8 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
         const colorIdx = series.indexOf(s);
         const detail = mode === "workout" ? (activeRow[`${s}__detail`] || []) : null;
         const suffix = mode === "exercise"
-          ? `${activeRow[s]}${metric === "e1rm" ? " e1RM" : ` ${unit}`}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
-          : `${activeRow[s]}${metric === "e1rm" ? " e1RM" : ` ${unit}`}`;
+          ? `${activeRow[s]}${metric === "e1rm" ? " est. max" : ` ${unit}`}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
+          : `${activeRow[s]}${metric === "e1rm" ? " est. max" : ` ${unit}`}`;
         return { series: s, color: LINE_COLORS[colorIdx % LINE_COLORS.length], text: `${s}: ${suffix}`, detail };
       })
     : [];
@@ -750,7 +751,7 @@ function findSimilarExercise(name, names) {
 }
 
 // Search that matches any part of a name, any word order: "press" finds Leg Press and Bench Press.
-function searchExercises(query, names, limit = 8) {
+function searchExercises(query, names, limit = 8, freq = {}) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const score = (name) => {
@@ -760,7 +761,7 @@ function searchExercises(query, names, limit = 8) {
     if (words.every((w) => l.split(/[^a-z0-9]+/).some((t) => t.startsWith(w)))) return 1;
     return 2;
   };
-  return names.map((n) => ({ n, s: score(n) })).filter((x) => x.s !== null).sort((a, b) => a.s - b.s || a.n.localeCompare(b.n)).slice(0, limit).map((x) => x.n);
+  return names.map((n) => ({ n, s: score(n) })).filter((x) => x.s !== null).sort((a, b) => a.s - b.s || (freq[b.n] || 0) - (freq[a.n] || 0) || a.n.localeCompare(b.n)).slice(0, limit).map((x) => x.n);
 }
 
 // Rest timer defaults: long for heavy compound lifts, shorter for isolation work.
@@ -1532,6 +1533,7 @@ export default function Home() {
   const cvText = (str) => (unit === "kg" ? String(str).replace(/(\d+(?:\.\d+)?)\s*lbs?\b/g, (m, n) => `${Math.round(Number(n) * KG_PER_LB * 2) / 2} kg`) : str);
   const [tickers, setTickers] = useState({});
   const [restTimes, setRestTimes] = useState({});
+  const [exMeta, setExMeta] = useState({}); // { [exercise]: { brand, oneSided } }
   const [saveError, setSaveError] = useState(null);
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
@@ -1545,6 +1547,8 @@ export default function Home() {
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newExerciseBrand, setNewExerciseBrand] = useState("");
   const [newExerciseTicker, setNewExerciseTicker] = useState("");
+  const [newExerciseOneSided, setNewExerciseOneSided] = useState(false);
+  const [newDayName, setNewDayName] = useState("");
   const [newExerciseDays, setNewExerciseDays] = useState([]); // workout ids the new exercise belongs to
   const [progQuery, setProgQuery] = useState("");   // the Progress search box (independent of the log search)
   const [progOpen, setProgOpen] = useState(false);
@@ -1594,7 +1598,7 @@ export default function Home() {
         nextEntries = nextEntries.map((e) => (e.workoutId === "legsB" ? { ...e, workoutId: "legsA" } : e));
         if (activeWorkoutId === "legsB") setActiveWorkoutId("legsA");
         // Save the merge immediately so it only ever needs to run once.
-        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode, tickers: data.tickers || {}, restTimes: data.restTimes || {} });
+        persist({ workouts: nextWorkouts, exercises: nextExercises, entries: nextEntries, restDays: nextRestDays, progressionMode: nextProgressionMode, tickers: data.tickers || {}, restTimes: data.restTimes || {}, exMeta: data.exMeta || {} });
       }
 
       setWorkouts(nextWorkouts);
@@ -1603,6 +1607,7 @@ export default function Home() {
       setRestDays(nextRestDays);
       setTickers(data.tickers || {});
       setRestTimes(data.restTimes || {});
+      setExMeta(data.exMeta || {});
       setProgressionMode(nextProgressionMode);
       setLoaded(true);
       setAuthError(null);
@@ -1703,9 +1708,11 @@ export default function Home() {
       progressionMode: next.progressionMode !== undefined ? next.progressionMode : progressionMode,
       tickers: next.tickers !== undefined ? next.tickers : tickers,
       restTimes: next.restTimes !== undefined ? next.restTimes : restTimes,
+      exMeta: next.exMeta !== undefined ? next.exMeta : exMeta,
     };
     setTickers(payload.tickers || {});
     setRestTimes(payload.restTimes || {});
+    setExMeta(payload.exMeta || {});
     setWorkouts(payload.workouts); setExercises(payload.exercises); setEntries(payload.entries); setRestDays(payload.restDays); setProgressionMode(payload.progressionMode);
     try {
       const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(payload) });
@@ -1744,17 +1751,25 @@ export default function Home() {
   // used most recently, which is what you want when you're alternating between two exercises.
   const suggestions = useMemo(() => {
     const q = form.exercise.trim();
-    if (!q) return [...recentExercises, ...allExerciseNames.filter((n) => !recentExercises.includes(n))].slice(0, 6);
+    const freq = {};
+    entries.forEach((e) => { freq[e.exercise] = (freq[e.exercise] || 0) + 1; });
+    if (!q) return [...allExerciseNames].sort((a, b) => (freq[b] || 0) - (freq[a] || 0)).slice(0, 6);
     if (allExerciseNames.some((n) => n.toLowerCase() === q.toLowerCase())) return [];
-    return searchExercises(q, allExerciseNames, 8);
-  }, [form.exercise, allExerciseNames, recentExercises]);
+    return searchExercises(q, allExerciseNames, 8, freq);
+  }, [form.exercise, allExerciseNames, entries]);
+  const displayEx = (n) => (exMeta[n] && exMeta[n].brand ? `${n} · ${exMeta[n].brand}` : n);
 
   // Adding a name that looks like one you already have ("Calf Raise" vs "Calf Raises") asks first.
   // An exercise can belong to several days; each day it's ticked for lists it.
-  const composeExerciseName = (name, brand) => [brand.trim(), name.trim()].filter(Boolean).join(" ");
   const addExerciseToList = (name, dayIds, force = false, brand = "") => {
-    const trimmed = composeExerciseName(name, brand);
+    const trimmed = name.trim();
+    const brandT = (brand || "").trim();
     if (!trimmed || !dayIds.length) return false;
+    const exact = allExerciseNames.find((n) => n.toLowerCase() === trimmed.toLowerCase());
+    if (exact && brandT && !force && ((exMeta[exact] && exMeta[exact].brand) || "").toLowerCase() !== brandT.toLowerCase()) {
+      setDupPrompt({ typed: trimmed, existing: exact, kind: "brand", brand: brandT, days: dayIds });
+      return false;
+    }
     if (!force) {
       const similar = findSimilarExercise(trimmed, allExerciseNames);
       if (similar) { setDupPrompt({ typed: trimmed, existing: similar, kind: "add", days: dayIds }); return false; }
@@ -1765,10 +1780,23 @@ export default function Home() {
       if (!list.some((e) => e.toLowerCase() === trimmed.toLowerCase())) nextEx[id] = [...list, trimmed];
     });
     const tk = newExerciseTicker.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
-    persist({ workouts, exercises: nextEx, entries, tickers: tk ? { ...tickers, [trimmed]: tk } : tickers });
+    const key = exact || trimmed;
+    const metaNext = { ...exMeta };
+    if (brandT || newExerciseOneSided) metaNext[key] = { ...(metaNext[key] || {}), ...(brandT ? { brand: brandT } : {}), ...(newExerciseOneSided ? { oneSided: true } : {}) };
+    persist({ workouts, exercises: nextEx, entries, tickers: tk ? { ...tickers, [trimmed]: tk } : tickers, exMeta: metaNext });
     setActiveWorkoutId(dayIds[0]);
-    selectExercise(trimmed);
+    selectExercise(key);
     return true;
+  };
+  // Custom training days: any name, same tracking as Push / Pull / Legs.
+  const addDay = (nameRaw) => {
+    const nm = (nameRaw || "").trim().slice(0, 20);
+    if (!nm) return null;
+    const hit = workouts.find((w) => w.name.toLowerCase() === nm.toLowerCase());
+    if (hit) return hit.id;
+    const id = "d" + Date.now().toString(36);
+    persist({ workouts: [...workouts, { id, name: nm }], exercises: { ...exercises, [id]: [] }, entries });
+    return id;
   };
   // Camera: photo of workout notes becomes a list of sets to check and save.
   const notesInputRef = useRef(null);
@@ -1787,7 +1815,8 @@ export default function Home() {
       const image = await shrinkImage(file, 1600, 0.85);
       const res = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ image, mediaType: "image/jpeg", known: allExerciseNames, unit }) });
       if (res.status === 429) { setNotesMsg("That's enough note photos for today."); return; }
-      if (!res.ok) { setNotesMsg("Notes camera isn't available right now."); return; }
+      if (res.status === 401) { setNotesMsg("Please sign in again, then retry."); return; }
+      if (!res.ok) { setNotesMsg(`Notes camera isn't available right now (${await apiWhy(res)}).`); return; }
       const out = await res.json();
       if (out.disabled) { setNotesMsg("Notes camera is turned off."); return; }
       if (!out.lines || !out.lines.length) { setNotesMsg("Couldn't find any sets. Try a closer, brighter photo."); return; }
@@ -1833,6 +1862,7 @@ export default function Home() {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("bad image")); };
     img.src = url;
   });
+  const apiWhy = async (res) => { let j = null; try { j = await res.json(); } catch (e) { /* ignore */ } const bits = [res.status, j && j.error, j && j.upstream ? `upstream ${j.upstream}` : "", j && j.detail ? String(j.detail).replace(/\s+/g, " ").slice(0, 120) : ""].filter(Boolean); return bits.join(" · "); };
   const scanMachine = async (file) => {
     if (!file) return;
     setScanBusy(true); setScanMsg("Reading the machine…");
@@ -1840,7 +1870,8 @@ export default function Home() {
       const image = await shrinkImage(file);
       const res = await fetch("/api/identify", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ image, mediaType: "image/jpeg" }) });
       if (res.status === 429) { setScanMsg("That's enough photos for today."); return; }
-      if (!res.ok) { setScanMsg("Camera isn't available right now. Type the name instead."); return; }
+      if (res.status === 401) { setScanMsg("Please sign in again, then retry."); return; }
+      if (!res.ok) { setScanMsg(`Camera isn't available right now (${await apiWhy(res)}). Type the name instead.`); return; }
       const out = await res.json();
       if (out.disabled) { setScanMsg("Camera is turned off. Type the name instead."); return; }
       if (!out.found) { setScanMsg("Couldn't read a machine name. Try the placard close up, or type it."); return; }
@@ -1853,7 +1884,7 @@ export default function Home() {
     } catch (e) { setScanMsg("Couldn't read that photo. Try again or type the name."); }
     finally { setScanBusy(false); if (scanInputRef.current) scanInputRef.current.value = ""; }
   };
-  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseTicker(""); setNewExerciseDays([]); setScanMsg(""); };
+  const resetAddForm = () => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseBrand(""); setNewExerciseTicker(""); setNewExerciseOneSided(false); setNewDayName(""); setNewExerciseDays([]); setScanMsg(""); };
 
   // Which workout an exercise "lives in" is decided by where it's already listed, not by
   // whichever tab happens to be open — so logging a Squat always files as Legs regardless
@@ -1888,9 +1919,10 @@ export default function Home() {
   // ---- Recommendation for one exercise ------------------------------------------------------------
   // Sets you're logging right now never change what's recommended for the rest of today's session;
   // only completed earlier sessions count. Once today becomes "yesterday" it becomes the new basis.
-  const buildRecommendation = (name, setCount, mWeight, mReps) => {
+  const buildRecommendation = (name, setCount, mWeight, mReps, sideArg) => {
     if (!name) return null;
-    const fullHist = entriesByExerciseStrength[name];
+    const sideNow = sideArg || logSide;
+    const fullHist = oneSidedNow(name) && entriesByExerciseStrength[name] ? entriesByExerciseStrength[name].filter((e) => !e.side || e.side === sideNow) : entriesByExerciseStrength[name];
     const priorHist = fullHist ? fullHist.filter((e) => e.date < todayISO()) : fullHist;
     const hist = priorHist && priorHist.length ? priorHist : fullHist;
     const hasManual = mWeight && mReps;
@@ -1928,20 +1960,22 @@ export default function Home() {
     return { noData: false, lastTop, lastSessionDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets, fromManual, defaultSets };
   };
 
-  const prefillFor = (name) => {
-    const rec = buildRecommendation(name, 1, "", "");
+  const prefillFor = (name, side) => {
+    const rec = buildRecommendation(name, 1, "", "", side);
     if (!rec || rec.noData) return { weight: "", sets: "", reps: "" };
     return { weight: String(Wrec(rec.nextTopWeight)), sets: String(rec.defaultSets), reps: String(rec.repLow) };
   };
 
   const [recExercise, setRecExercise] = useState(null);
+  const [logSide, setLogSide] = useState("L");
+  const oneSidedNow = (n) => !!(n && exMeta[n] && exMeta[n].oneSided);
   const [manualWeight, setManualWeight] = useState("");
   const [manualReps, setManualReps] = useState("");
   // The plan always lays out at least 4 working sets; the Sets box only says how many you log per entry.
-  const recSetCount = Math.min(8, Math.max(4, Number(form.sets) || 4));
+  const recSetCount = 4;
   const recommendation = useMemo(
     () => buildRecommendation(recExercise, recSetCount, manualWeight ? String(toLbs(manualWeight)) : "", manualReps),
-    [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode, unit]
+    [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode, unit, logSide, exMeta]
   );
 
   // Picking an exercise (from the list, the search box or the swap button) stashes whatever is in
@@ -2019,7 +2053,7 @@ export default function Home() {
       if (similar) { setDupPrompt({ typed: exerciseName, existing: similar, kind: "log" }); return; }
     }
     const homeWorkoutId = findExerciseHome(exerciseName) || activeWorkoutId;
-    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: homeWorkoutId, exercise: exerciseName, weight: toLbs(form.weight), sets: form.sets ? Number(form.sets) : 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate, isWarmup: !!form.isWarmup };
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, workoutId: homeWorkoutId, exercise: exerciseName, weight: toLbs(form.weight), sets: 1, reps: form.reps ? Number(form.reps) : 0, date: selectedDate, isWarmup: !!form.isWarmup, ...(oneSidedNow(exerciseName) ? { side: logSide } : {}), ...(exMeta[exerciseName] && exMeta[exerciseName].brand ? { brand: exMeta[exerciseName].brand } : {}) };
     const list = exercises[homeWorkoutId] || [];
     const nextExercises = list.some((e) => e.toLowerCase() === exerciseName.toLowerCase()) ? exercises : { ...exercises, [homeWorkoutId]: [...list, exerciseName] };
     persist({ workouts, exercises: nextExercises, entries: [entry, ...entries] });
@@ -2103,6 +2137,49 @@ export default function Home() {
     setChartFocusExercise(mergeUndo.from);
     setMergeUndo(null);
   };
+  // ---- Edit an exercise: name, brand, one side or both, which days ----
+  const [editEx, setEditEx] = useState(null); // { orig, name, brand, oneSided, days, newDay, err }
+  const openEditEx = (name) => {
+    const days = workouts.filter((w) => (exercises[w.id] || []).some((n) => n.toLowerCase() === name.toLowerCase())).map((w) => w.id);
+    const m = exMeta[name] || {};
+    setEditEx({ orig: name, name, brand: m.brand || "", oneSided: !!m.oneSided, days, newDay: "", err: "" });
+  };
+  const saveEditEx = () => {
+    if (!editEx) return;
+    const orig = editEx.orig, nm = editEx.name.trim();
+    if (!nm) { setEditEx({ ...editEx, err: "Give it a name." }); return; }
+    if (!editEx.days.length) { setEditEx({ ...editEx, err: "Pick at least one day." }); return; }
+    if (nm.toLowerCase() !== orig.toLowerCase() && allExerciseNames.some((n) => n.toLowerCase() === nm.toLowerCase())) { setEditEx({ ...editEx, err: `You already have "${nm}". To combine two, use Merge on the Progress page.` }); return; }
+    const renamed = nm !== orig;
+    const nextExercises = {};
+    workouts.forEach((w) => {
+      let list = (exercises[w.id] || []).map((n) => (n === orig ? nm : n));
+      const has = list.some((n) => n === nm);
+      if (editEx.days.includes(w.id) && !has) list = [...list, nm];
+      if (!editEx.days.includes(w.id) && has) list = list.filter((n) => n !== nm);
+      nextExercises[w.id] = list;
+    });
+    Object.keys(exercises).forEach((k) => { if (!nextExercises[k]) nextExercises[k] = (exercises[k] || []).map((n) => (n === orig ? nm : n)); });
+    const home = editEx.days[0];
+    const nextEntries = renamed ? entries.map((e) => (e.exercise === orig ? { ...e, exercise: nm } : e)) : entries;
+    const moveKey = (obj) => { if (!renamed || !obj || obj[orig] === undefined) return obj; const o = { ...obj }; o[nm] = o[orig]; delete o[orig]; return o; };
+    const metaNext = moveKey({ ...exMeta }) || {};
+    const b = editEx.brand.trim();
+    const cur = { ...(metaNext[nm] || {}) };
+    if (b) cur.brand = b; else delete cur.brand;
+    if (editEx.oneSided) cur.oneSided = true; else delete cur.oneSided;
+    if (Object.keys(cur).length) metaNext[nm] = cur; else delete metaNext[nm];
+    persist({ workouts, exercises: nextExercises, entries: nextEntries, tickers: moveKey(tickers), restTimes: moveKey(restTimes), exMeta: metaNext });
+    if (renamed) {
+      if (draftsRef.current[orig]) { draftsRef.current[nm] = draftsRef.current[orig]; delete draftsRef.current[orig]; }
+      setRecentExercises((r) => r.map((n) => (n === orig ? nm : n)));
+      if (recExercise === orig) setRecExercise(nm);
+      if (chartFocusExercise === orig) setChartFocusExercise(nm);
+      setForm((f) => (f.exercise === orig ? { ...f, exercise: nm } : f));
+      setXpage((x) => (x && x.exercise === orig ? { ...x, exercise: nm } : x));
+    }
+    setEditEx(null);
+  };
   const [exUndo, setExUndo] = useState(null);
   const exUndoTimer = useRef(null);
   const deleteExercise = (name) => {
@@ -2126,7 +2203,9 @@ export default function Home() {
 
   // ---- Overall-section data -------------------------------------------------------------------------
   const [portfolioRange, setPortfolioRange] = useState("3m");
-  const [maKey, setMaKey] = useState("30");
+  const [maKeyRaw, setMaKey] = useState("30");
+  const [compareOpen, setCompareOpen] = useState(false);
+  const maKey = compareOpen ? maKeyRaw : "off";
   const [scrubPoint, setScrubPoint] = useState(null);
 
   const radarData = useMemo(() => {
@@ -2213,10 +2292,10 @@ export default function Home() {
   // ---- Tutorial (runs on sample data that is never saved) ----
   const [tutIdx, setTutIdx] = useState(null);
   const tutSnap = useRef(null);
-  const closeAllViews = () => { setCarouselOpen(false); setXpage(null); setFeedOpen(false); setSettingsOpen(false); setAddingExercise(false); };
+  const closeAllViews = () => { setCompareOpen(false); setCarouselOpen(false); setXpage(null); setFeedOpen(false); setSettingsOpen(false); setAddingExercise(false); };
   const startTutorial = () => {
     if (demoRef.current) return;
-    tutSnap.current = { workouts, exercises, entries, restDays, tickers, progressionMode, chartFocusExercise, selectedDate };
+    tutSnap.current = { workouts, exercises, entries, restDays, tickers, exMeta, progressionMode, chartFocusExercise, selectedDate };
     demoRef.current = true;
     const d = buildDemoData();
     setWorkouts(d.workouts); setExercises(d.exercises); setEntries(d.entries); setRestDays([]); setTickers({});
@@ -2227,7 +2306,7 @@ export default function Home() {
   const endTutorial = () => {
     const sn = tutSnap.current;
     closeAllViews();
-    if (sn) { setWorkouts(sn.workouts); setExercises(sn.exercises); setEntries(sn.entries); setRestDays(sn.restDays); setTickers(sn.tickers); setProgressionMode(sn.progressionMode); setChartFocusExercise(sn.chartFocusExercise); setProgCleared(!sn.chartFocusExercise); setSelectedDate(sn.selectedDate); }
+    if (sn) { setWorkouts(sn.workouts); setExercises(sn.exercises); setEntries(sn.entries); setRestDays(sn.restDays); setTickers(sn.tickers); setExMeta(sn.exMeta || {}); setProgressionMode(sn.progressionMode); setChartFocusExercise(sn.chartFocusExercise); setProgCleared(!sn.chartFocusExercise); setSelectedDate(sn.selectedDate); }
     demoRef.current = false; tutSnap.current = null;
     setTutIdx(null);
     try { localStorage.setItem("hooksTutorialDone", "1"); } catch (e) { /* ignore */ }
@@ -2242,16 +2321,16 @@ export default function Home() {
   const cardWith = (txt) => () => Array.from(document.querySelectorAll("[data-tut=charts] .card")).find((c) => c.textContent.includes(txt)) || null;
   const tutSteps = [
     { text: `${APP_TITLE} · Gym Analytics. Track every lift. Never stall.`, before: () => { closeAllViews(); window.scrollTo(0, 0); }, next: "Start" },
-    { text: "Pull down to see a ticker for each exercise with your estimated one-rep max.", before: () => { closeAllViews(); window.scrollTo(0, 0); setTimeout(() => setCarouselOpen(true), 30); }, target: qs(".carousel") },
+    { text: "Tap Exercises, or pull down, to see each exercise with your estimated max.", before: () => { closeAllViews(); window.scrollTo(0, 0); setTimeout(() => setCarouselOpen(true), 30); }, target: qs(".carousel") },
     { text: "Tap a ticker to open it.", before: () => { setXpage(null); setCarouselOpen(true); window.scrollTo(0, 0); }, target: qs(".carousel-card:not(.all)"), wait: () => !!xpage },
     { text: "Your one-rep max, estimated five-rep max, average weight, total volume and sessions logged.", before: () => { setCarouselOpen(false); setXpage((x) => x || { exercise: "Bench Press", date: todayISO(), ytd: true }); }, target: qs(".stats-block") },
     { text: "Switch the time range to see your strength over 1, 3 or 6 months and more.", before: () => { closeAllViews(); window.scrollTo(0, 0); }, target: qs(".overall-screen .range-tabs") },
-    { text: "This is your average strength over that period. Tap 30, 90 or 365 days to see if you are beating your own average.", before: () => { closeAllViews(); }, target: qs(".overall-screen .pills-sub") },
+    { text: "This is your average strength over that period. Tap 30, 90 or 365 days to see if you are beating your own average.", before: () => { closeAllViews(); setCompareOpen(true); }, target: qs(".overall-screen .pills-sub") },
     { text: "Log every set to make sure you keep progressively overloading. There is no point lifting if you are not improving.", before: () => { closeAllViews(); }, target: qs(".log-set-row") },
     { text: "Lifter's Digest: your latest workout, what is improving, and what needs work.", before: () => { closeAllViews(); }, target: qs(".digest-card2") },
     { text: "Exercises belong to workout days. Orange marks the day you have not hit in a while.", before: () => { closeAllViews(); }, target: qs(".due-pill") },
     { text: "Search an exercise, enter weight, reps and sets. Log one set at a time or all at once.", before: () => { closeAllViews(); }, target: qs(".card-tabbed") },
-    { text: "Add a new exercise with a name, a ticker, the brand and a workout day. The same machine feels different across brands, so track them separately.", before: () => { closeAllViews(); }, target: qs("[data-tut=addex]") },
+    { text: "Add a new exercise with a name, a ticker, the brand and a workout day. The brand is just a label, so the same lift on a different machine stays on one progress line.", before: () => { closeAllViews(); }, target: qs("[data-tut=addex]") },
     { text: "Photograph your handwritten notes and the app imports those sets, so your history comes with you.", before: () => { closeAllViews(); }, target: qs(".cam-btn") },
     { text: "Pick an exercise to see if you are improving. Top weight is your heaviest set. Estimated 1RM is what you could lift once, calculated from your weight and reps.", before: () => { closeAllViews(); }, target: () => { const sv = Array.from(document.querySelectorAll("[data-tut=charts] svg")).find((x) => x.getBoundingClientRect().height > 120); return sv ? sv.parentElement : null; } },
     { text: "Every logged set is listed below the graph.", before: () => { closeAllViews(); }, target: () => document.querySelector("[data-tut=charts] .hist-list") },
@@ -2752,8 +2831,10 @@ export default function Home() {
           <input type="number" inputMode="decimal" value={editForm.weight} onChange={(ev) => setEditForm({ ...editForm, weight: ev.target.value })} style={{ width: 52, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
           <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{unit} ×</span>
           <input type="number" inputMode="numeric" value={editForm.reps} onChange={(ev) => setEditForm({ ...editForm, reps: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
-          <span className="muted" style={{ fontSize: "var(--fs-label)" }}>×</span>
-          <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
+          {(e.sets || 1) > 1 && (<>
+            <span className="muted" style={{ fontSize: "var(--fs-label)" }}>×</span>
+            <input type="number" inputMode="numeric" value={editForm.sets} onChange={(ev) => setEditForm({ ...editForm, sets: ev.target.value })} style={{ width: 40, padding: "4px 4px", fontSize: "var(--fs-label)" }} />
+          </>)}
           <button className="del-btn" onClick={() => saveEdit(e.id)} style={{ color: "var(--gain)", fontWeight: 600 }}>✓</button>
           <button className="del-btn" onClick={cancelEdit}>✕</button>
         </span>
@@ -2762,20 +2843,20 @@ export default function Home() {
       <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
         <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
           <button type="button" className="hist-date" onClick={() => openExercise(e.exercise, e.date, false)} aria-label={`Open ${e.exercise} through ${fmtDate(e.date)}`}>{fmtDate(e.date)}</button>
-          <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+          <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
         </div>
       </SwipeRow>
     ) : (
       <div key={e.id} className={compact ? "hist-item" : "today-item"} style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
         {compact
           ? <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
-          : <span style={{ fontWeight: 600 }}>{e.exercise}{e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> (warm-up)</span>}</span>}
+          : <span style={{ fontWeight: 600 }}>{e.exercise}{e.side && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> ({e.side === "L" ? "left" : "right"})</span>}{e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> (warm-up)</span>}</span>}
         <span className="num">
           {W(e.weight)}<span className="muted">{unit}</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
           {compact && e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)" }}>(warm-up)</span>}
           <button className="del-btn" onClick={() => startEdit(e)} title="Edit" aria-label="Edit set">✎</button>
           <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: "var(--fs-label)", fontWeight: 600, color: e.isWarmup ? "var(--text-primary)" : "var(--text-secondary)" }}>W</button>
-          <button className="del-btn del-x" onClick={() => deleteEntry(e.id)} aria-label="Delete set">✕</button>
+          <button className="del-btn del-x" onClick={() => deleteEntry(e.id)} aria-label="Delete set"><span className="x-circle">✕</span></button>
         </span>
       </div>
     )
@@ -2798,20 +2879,20 @@ export default function Home() {
         <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd} onTouchCancel={onPullEnd}>
           <DotTitle text={APP_TITLE} height={titlePull} dragging={titleDrag} progress={titlePull / TITLE_MAX} />
           <button type="button" className={"pull-cue" + (carouselOpen ? " open" : "")} onClick={() => setCarouselOpen((v) => !v)} aria-label={carouselOpen ? "Hide exercises" : "Show exercises"}>
-            <svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
+            <span className="pc-text">Exercises</span><svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
           </button>
           <div className={"carousel" + (carouselOpen ? " open" : "")} aria-hidden={!carouselOpen}
             onTouchStart={() => { pull.current = null; }}>
             <div className="carousel-row">
               <button type="button" className="carousel-card all" tabIndex={carouselOpen ? 0 : -1} onClick={() => setCarouselOpen(false)}>
-                <span className="cc-name">All lifts</span>
-                <span className="cc-val">Index</span>
+                <span className="cc-name">All exercises</span>
+                <span className="cc-val">Overall</span>
                 <span className="cc-pct" style={{ color: allLiftsYtd === null ? "var(--text-tertiary)" : allLiftsYtd >= 0 ? "var(--gain)" : "var(--loss)" }}>{allLiftsYtd === null ? "n/a" : `${allLiftsYtd >= 0 ? "▲" : "▼"} ${Math.abs(allLiftsYtd).toFixed(1)}%`}</span>
               </button>
               {carouselItems.map((it) => (
                 <button key={it.name} type="button" className="carousel-card" tabIndex={carouselOpen ? 0 : -1} onClick={() => openExercise(it.name, it.last, true)}>
                   <span className="cc-name">{tickerOf(it.name)}</span>
-                  <span className="cc-val">{W(it.e1rm)} e1RM</span>
+                  <span className="cc-val">{W(it.e1rm)} est. max</span>
                   <span className="cc-pct" style={{ color: it.pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{it.pct >= 0 ? "▲" : "▼"} {Math.abs(it.pct).toFixed(1)}%</span>
                 </button>
               ))}
@@ -2829,7 +2910,8 @@ export default function Home() {
                     ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} intro={introOn} />
                     : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
-                  <span className="index-tag">Strength Index · {portfolioSeries.exerciseCount} lifts</span>
+                  {!scrubPoint && <span className="plain-line">{`Your strength is ${up ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% over ${RANGE_WORDS[portfolioRange] || "this range"}.`}</span>}
+                  <span className="index-tag">Overall strength · {portfolioSeries.exerciseCount} exercises</span>
                 </>
               );
             })()}
@@ -2859,36 +2941,37 @@ export default function Home() {
               <button key={r.key} className={"pill" + (r.key === portfolioRange ? " active" : "")} onClick={() => { setPortfolioRange(r.key); setScrubPoint(null); }}><span className="tab-l">{r.label}</span></button>
             ))}
           </div>
-          <div className="pills pills-sub">
+          <button type="button" className={"compare-chip" + (compareOpen ? " on" : "")} aria-expanded={compareOpen} onClick={() => setCompareOpen((v) => !v)}>{compareOpen ? "Hide average" : "Compare to your average"}</button>
+          {compareOpen && <div className="pills pills-sub">
             {MA_OPTIONS.map((m) => (
-              <button key={m.key} className={"pill pill-sm" + (m.key === maKey ? " active" : "")} onClick={() => setMaKey(m.key)}><span className="tab-l">{m.label}</span></button>
+              <button key={m.key} className={"pill pill-sm" + (m.key === maKeyRaw ? " active" : "")} onClick={() => setMaKey(m.key)}><span className="tab-l">{m.label}</span></button>
             ))}
-          </div>
+          </div>}
 
           <button className="log-set-row" onClick={() => scrollToSection("home")}>
             <span>Log a set</span>
-            <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-title)" }}>›</span>
+            <span className="lsr-due">{dueWorkout ? `${dueWorkout.workout.name} is due` : ""} ›</span>
           </button>
 
           <div className="digest-card2" onClick={() => setDigestOpen((o) => !o)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDigestOpen((o) => !o); }}>
             <div className="insights-head">
               <span className="label-sm" style={{ marginBottom: 0 }}>Lifter's Digest{aiDigest ? <span className="ai-tag">AI</span> : null}</span>
-              <span className="insight-count">{digestOpen ? "tap to collapse" : "tap for full"}</span>
+              <span className="insight-count">{digestOpen ? "less" : "more"}</span>
             </div>
-            {[["last", "Last workout", "var(--text-secondary)"], ["up", "Improving", "var(--gain)"], ["down", "Slipping or flat", "var(--loss)"], ["due", "Due soon", "var(--text-secondary)"]].map(([k, label, col]) => (
+            {[["last", "Last workout", "var(--text-secondary)"], ["up", "Improving", "var(--gain)"], ["down", "Slipping or flat", "var(--loss)"], ["due", "Due soon", "var(--text-secondary)"]].filter(([k]) => digestOpen || k === "last" || k === "up").map(([k, label, col]) => (
               <div key={k} className="dg-sec">
                 <div className="dg-label" style={{ color: col }}>{label}</div>
                 <div className={"dg-text" + (digestOpen ? " open" : "")}>{digest[k]}</div>
               </div>
             ))}
-            <div className="week-tiles dg-tiles">
+            {digestOpen && <div className="week-tiles dg-tiles">
               {dayStats.map((d) => (
                 <button key={d.workout.id} className={"week-tile" + (dueWorkout && dueWorkout.workout.id === d.workout.id ? " due" : "")} onClick={(ev) => { ev.stopPropagation(); scrollToSection("home"); startDay(d.workout.id); }}>
                   <span className="wt-name">{d.workout.name}</span>
                   <span className="wt-ago">{d.days === Infinity ? "never" : d.days === 0 ? "today" : `${d.days}d ago`}</span>
                 </button>
               ))}
-            </div>
+            </div>}
           </div>
 
         </div>
@@ -2936,7 +3019,7 @@ export default function Home() {
               {showSuggestions && suggestions.length > 0 && (
                 <div className="suggestions">
                   {suggestions.map((s) => (
-                    <button key={s} onClick={() => selectExercise(s)}>{s}</button>
+                    <button key={s} onClick={() => selectExercise(s)}>{displayEx(s)}</button>
                   ))}
                 </div>
               )}
@@ -2944,7 +3027,7 @@ export default function Home() {
             {swapTarget && (
               <div className="nav-row">
                 <button className="swap-btn" onClick={() => selectExercise(swapTarget)} aria-label={`Switch to ${swapTarget}`}>
-                  <span className="swap-icon">⇄</span><span className="swap-text">Switch to {swapTarget}</span>
+                  <span className="swap-icon">⇄</span><span className="swap-text">Switch to {displayEx(swapTarget)}</span>
                 </button>
               </div>
             )}
@@ -2955,7 +3038,7 @@ export default function Home() {
               return (
                 <div className="st-grid st-mini">
                   <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{W(st.e5rm)}</div></div>
-                  <div className="st-cell"><div className="st-label">e1RM</div><div className="st-val">{W(st.e1rm)}</div></div>
+                  <div className="st-cell"><div className="st-label">Est. max</div><div className="st-val">{W(st.e1rm)}</div></div>
                   <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{W(st.lastSet.weight)} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
                 </div>
               );
@@ -3002,7 +3085,22 @@ export default function Home() {
               </div>
             )}
 
-            {dupPrompt && (
+            {dupPrompt && dupPrompt.kind === "brand" && (
+              <div className="dup-prompt">
+                <div style={{ fontSize: "var(--fs-label)", lineHeight: 1.4, marginBottom: 8 }}>
+                  You already have <b>{dupPrompt.existing}</b>{exMeta[dupPrompt.existing] && exMeta[dupPrompt.existing].brand ? <> on {exMeta[dupPrompt.existing].brand}</> : null}. Same lift on {dupPrompt.brand}?
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn-iron" style={{ flex: 1, padding: "8px 4px", fontSize: "var(--fs-label)" }} onClick={() => {
+                    addExerciseToList(dupPrompt.typed, dupPrompt.days || [activeWorkoutId], true, dupPrompt.brand); resetAddForm(); setDupPrompt(null);
+                  }}>Same lift, combine</button>
+                  <button className="pill" style={{ flex: 1, padding: "8px 4px", fontSize: "var(--fs-label)" }} onClick={() => {
+                    addExerciseToList(`${dupPrompt.typed} (${dupPrompt.brand})`, dupPrompt.days || [activeWorkoutId], true, ""); resetAddForm(); setDupPrompt(null);
+                  }}>Track separately</button>
+                </div>
+              </div>
+            )}
+            {dupPrompt && dupPrompt.kind !== "brand" && (
               <div className="dup-prompt">
                 <div style={{ fontSize: "var(--fs-label)", lineHeight: 1.4, marginBottom: 8 }}>
                   You already have <b>{dupPrompt.existing}</b>. Is "{dupPrompt.typed}" the same lift?
@@ -3021,7 +3119,7 @@ export default function Home() {
             )}
 
             <div className="stepper-list" style={{ marginTop: 12 }}>
-              {[["weight", `Weight (${unit})`, unit, "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "reps", "numeric", 1], ["sets", "Sets", "sets", "numeric", 1]].map(([key, label, ph, mode, step]) => (
+              {[["weight", `Weight (${unit})`, unit, "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "reps", "numeric", 1]].map(([key, label, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
                   <div className="label-sm stepper-label">{label}</div>
                   <div className="stepper-row">
@@ -3033,6 +3131,13 @@ export default function Home() {
               ))}
             </div>
             <div className="warm-row">
+              {oneSidedNow(form.exercise.trim()) && (
+                <div className="side-row" role="group" aria-label="Which side">
+                  {[["L", "Left"], ["R", "Right"]].map(([k, lab]) => (
+                    <button key={k} type="button" className={"chip" + (logSide === k ? " active" : "")} aria-pressed={logSide === k} onClick={() => { setLogSide(k); const d = prefillFor(form.exercise.trim(), k); if (d && d.weight) setForm((f) => ({ ...f, weight: d.weight, reps: d.reps })); }}>{lab}</button>
+                  ))}
+                </div>
+              )}
               <button type="button" className={"chip" + (form.isWarmup ? " active" : "")} aria-pressed={!!form.isWarmup} onClick={() => setForm({ ...form, isWarmup: !form.isWarmup })}>Warm-up</button>
             </div>
             <InfoFoot title="warm-up sets" info="Warm-up sets don't count toward recommendations or your top set" right={<button type="button" className="cam-btn" aria-label="Import a photo of your handwritten notes" onClick={() => notesInputRef.current && notesInputRef.current.click()}><DotNotebook size={3} /></button>} />
@@ -3052,6 +3157,9 @@ export default function Home() {
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
             <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              {recExercise && allExerciseNames.includes(recExercise) && !addingExercise && (
+                <button className="add-ex-link" style={{ marginBottom: 0 }} onClick={() => openEditEx(recExercise)}>Edit {recExercise}</button>
+              )}
               {!addingExercise ? (
                 <button className="add-ex-link" style={{ marginBottom: 0 }} data-tut="addex" onClick={() => setAddingExercise(true)}>+ Add new exercise</button>
               ) : (
@@ -3068,7 +3176,11 @@ export default function Home() {
               <div className="helper" style={{ marginBottom: 8 }}>Tip: photograph the placard with the machine name and brand.</div>
               <input value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} placeholder="Exercise name" style={{ marginBottom: 8 }} />
               <input value={newExerciseTicker} onChange={(e) => setNewExerciseTicker(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))} placeholder={`Ticker (optional, ${defaultTicker(newExerciseName) || "e.g. BENCH"})`} maxLength={5} autoCapitalize="characters" style={{ marginBottom: 8, fontFamily: "var(--font-num)", letterSpacing: ".06em" }} />
-              <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 12 }} />
+              <input value={newExerciseBrand} onChange={(e) => setNewExerciseBrand(e.target.value)} list="machine-brands" placeholder="Machine / brand (optional)" style={{ marginBottom: 8 }} />
+              <div className="side-row" style={{ marginBottom: 12 }} role="group" aria-label="Both sides or one at a time">
+                <button type="button" className={"chip" + (!newExerciseOneSided ? " active" : "")} aria-pressed={!newExerciseOneSided} onClick={() => setNewExerciseOneSided(false)}>Both sides</button>
+                <button type="button" className={"chip" + (newExerciseOneSided ? " active" : "")} aria-pressed={newExerciseOneSided} onClick={() => setNewExerciseOneSided(true)}>One side at a time</button>
+              </div>
               <datalist id="machine-brands">{MACHINE_BRANDS.map((b) => <option key={b} value={b} />)}</datalist>
               <div className="label-sm" style={{ marginBottom: 4 }}>Which day(s)? Tick any that apply</div>
               <div className="day-checks">
@@ -3078,6 +3190,10 @@ export default function Home() {
                     {w.name}
                   </label>
                 ))}
+              </div>
+              <div className="newday-row">
+                <input value={newDayName} onChange={(e) => setNewDayName(e.target.value)} placeholder="New day (e.g. Shoulders)" maxLength={20} />
+                <button type="button" className="chip" disabled={!newDayName.trim()} onClick={() => { const id = addDay(newDayName); if (id) { setNewExerciseDays((d) => [...d, id]); setNewDayName(""); } }}>Add day</button>
               </div>
               <button className="btn-iron save-btn" disabled={!newExerciseName.trim() || !newExerciseDays.length} style={{ opacity: newExerciseName.trim() && newExerciseDays.length ? 1 : 0.5, marginTop: 12 }}
                 onClick={() => { if (addExerciseToList(newExerciseName, newExerciseDays, false, newExerciseBrand)) resetAddForm(); }}>
@@ -3120,7 +3236,7 @@ export default function Home() {
           </div>
           <div className="pills pills-sub">
             <button className={"pill pill-sm" + (chartMetric === "weight" ? " active" : "")} onClick={() => setChartMetric("weight")}><span className="tab-l">Top Weight</span></button>
-            <button className={"pill pill-sm" + (chartMetric === "e1rm" ? " active" : "")} onClick={() => setChartMetric("e1rm")}><span className="tab-l">Est. 1RM</span></button>
+            <button className={"pill pill-sm" + (chartMetric === "e1rm" ? " active" : "")} onClick={() => setChartMetric("e1rm")}><span className="tab-l">Est. max</span></button>
           </div>
           {chartResult.rows.length === 0 ? (
             <div className="empty">{chartFocusExercise ? "No sets logged in this range yet." : "Pick an exercise to see its progress."}</div>
@@ -3277,7 +3393,7 @@ export default function Home() {
         <div className="xpage" role="dialog" aria-label={xpage.exercise}>
           <div className="xp-top">
             <button type="button" className="xp-back" onClick={closeExercise} aria-label="Back"><svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L2 10l8 8" /></svg></button>
-            <div className="xp-title">{xpage.exercise}</div>
+            <div className="xp-title">{displayEx(xpage.exercise)}</div>
           </div>
           <div className="xp-scroll">
             <div className="label-sm" style={{ textAlign: "center", marginBottom: 8 }}>{xpage.ytd ? "Year to date" : `Through ${fmtDateFull(xpage.date)}`}</div>
@@ -3291,7 +3407,7 @@ export default function Home() {
                       ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} />
                       : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                     <span className="index-meta"><span className="cap">{xScrub ? xScrub.label : xpage.ytd ? "YTD" : "Since first log"}</span></span>
-                    <span className="index-tag">Estimated 1RM · {xData.series.sessions} sessions</span>
+                    <span className="index-tag">Est. max · {xData.series.sessions} sessions</span>
                   </>
                 );
               })()}
@@ -3313,7 +3429,7 @@ export default function Home() {
               return (
                 <div className="stats-block">
                   <div className="st-grid">
-                    {cell("e1RM", W(xStats.e1rm))}
+                    {cell("Est. max", W(xStats.e1rm))}
                     {cell("e5RM", W(xStats.e5rm))}
                     {cell(xpage.ytd ? "YTD" : "Change", pct === null ? "n/a" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`, pct === null ? null : pct >= 0 ? "var(--gain)" : "var(--loss)")}
                     {cell(`Volume (${unit})`, fmtNum(W(xStats.volume)))}
@@ -3344,7 +3460,7 @@ export default function Home() {
                     ? renderEditableRow(e, false)
                     : (
                       <div key={e.id} className="today-item" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
-                        <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                        <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
                       </div>
                     )))}
                 </div>
@@ -3358,7 +3474,7 @@ export default function Home() {
                   <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
                     <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
                       <button type="button" className={"hist-date" + (e.date === xpage.date ? " on" : "")} onClick={() => { setXpage({ ...xpage, date: e.date, ytd: false }); setXScrub(null); }}>{fmtDate(e.date)}</button>
-                      <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                      <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
                     </div>
                   </SwipeRow>
                 )))}
@@ -3367,6 +3483,7 @@ export default function Home() {
             {xEdit && (
               <div className="card flat">
                 <div className="label-sm">Danger zone</div>
+                <button type="button" className="btn-iron" style={{ marginBottom: 10 }} onClick={() => openEditEx(xpage.exercise)}>Edit {xpage.exercise}</button>
                 <button type="button" className="btn-danger" onClick={() => deleteExercise(xpage.exercise)}>Delete {xpage.exercise} and all its sets</button>
                 <div className="cap" style={{ marginTop: "var(--s-2)" }}>You can undo for 10 seconds after deleting.</div>
               </div>
@@ -3375,6 +3492,43 @@ export default function Home() {
         </div>
       )}
 
+      {editEx && (
+        <>
+          <div className="sheet-backdrop" onClick={() => setEditEx(null)} />
+          <div className="sheet" role="dialog" aria-label="Edit exercise">
+            <div className="sheet-grip" />
+            <div className="sheet-head">
+              <span className="sheet-title">Edit exercise</span>
+              <button className="close-btn" onClick={() => setEditEx(null)} aria-label="Close">✕</button>
+            </div>
+            <div className="label-sm" style={{ marginBottom: 4 }}>Name</div>
+            <input value={editEx.name} onChange={(e) => setEditEx({ ...editEx, name: e.target.value, err: "" })} style={{ marginBottom: 10 }} />
+            <div className="label-sm" style={{ marginBottom: 4 }}>Machine / brand (optional)</div>
+            <input value={editEx.brand} onChange={(e) => setEditEx({ ...editEx, brand: e.target.value })} list="machine-brands" placeholder="e.g. Life Fitness" style={{ marginBottom: 10 }} />
+            <datalist id="machine-brands">{MACHINE_BRANDS.map((b) => <option key={b} value={b} />)}</datalist>
+            <div className="helper" style={{ marginBottom: 10 }}>The brand is a label. Changing it keeps all your history on one progress line.</div>
+            <div className="side-row" style={{ marginBottom: 12 }} role="group" aria-label="Both sides or one at a time">
+              <button type="button" className={"chip" + (!editEx.oneSided ? " active" : "")} aria-pressed={!editEx.oneSided} onClick={() => setEditEx({ ...editEx, oneSided: false })}>Both sides</button>
+              <button type="button" className={"chip" + (editEx.oneSided ? " active" : "")} aria-pressed={editEx.oneSided} onClick={() => setEditEx({ ...editEx, oneSided: true })}>One side at a time</button>
+            </div>
+            <div className="label-sm" style={{ marginBottom: 4 }}>Day(s)</div>
+            <div className="day-checks">
+              {workouts.map((w) => (
+                <label key={w.id} className={"day-check" + (editEx.days.includes(w.id) ? " on" : "")}>
+                  <input type="checkbox" checked={editEx.days.includes(w.id)} onChange={() => setEditEx({ ...editEx, err: "", days: editEx.days.includes(w.id) ? editEx.days.filter((x) => x !== w.id) : [...editEx.days, w.id] })} />
+                  {w.name}
+                </label>
+              ))}
+            </div>
+            <div className="newday-row">
+              <input value={editEx.newDay} onChange={(e) => setEditEx({ ...editEx, newDay: e.target.value })} placeholder="New day (e.g. Shoulders)" maxLength={20} />
+              <button type="button" className="chip" disabled={!editEx.newDay.trim()} onClick={() => { const id = addDay(editEx.newDay); if (id) setEditEx((x) => ({ ...x, days: x.days.includes(id) ? x.days : [...x.days, id], newDay: "" })); }}>Add day</button>
+            </div>
+            {editEx.err && <div className="warn" style={{ marginTop: 10 }}>{editEx.err}</div>}
+            <button className="btn-iron save-btn" style={{ marginTop: 14 }} onClick={saveEditEx}>Save</button>
+          </div>
+        </>
+      )}
       {notesOpen && (
         <>
           <div className="sheet-backdrop" onClick={() => { if (!notesBusy) setNotesOpen(false); }} />
@@ -3542,8 +3696,9 @@ export default function Home() {
       )}
 
       {feedOpen && <FeedPage />}
+      <button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><IconFeed color="currentColor" /></button>
 
-      <div className="bottom-nav" ref={navRef} style={{ "--i": feedOpen ? 3 : activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
+      <div className={"bottom-nav" + (feedOpen ? " feed-on" : "")} ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
         <button className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
@@ -3555,9 +3710,7 @@ export default function Home() {
         <button className={"bottom-nav-item" + (!feedOpen && activeSection === "charts" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("charts"); }}>
           <IconChart color="currentColor" /><span>Progress</span>
         </button>
-        <button className={"bottom-nav-item" + (feedOpen ? " active" : "")} onClick={() => setFeedOpen(true)}>
-          <IconFeed color="currentColor" /><span>Feed</span>
-        </button>
+
       </div>
     </div>
     </>

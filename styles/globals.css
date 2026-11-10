@@ -111,7 +111,7 @@ select.scope{width:100%;padding:var(--s-3) var(--s-4);font-size:var(--fs-body);f
 .chart-box{padding:var(--s-3) 0 var(--s-1);margin:0 calc(var(--s-3) * -1) var(--s-1);}
 
 /* ---- Tab bar: solid, no glow ---- */
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;height:var(--tabbar-h);padding:0 var(--s-2) env(safe-area-inset-bottom);background:var(--surface);border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);align-items:stretch;z-index:40;}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;height:var(--tabbar-h);padding:0 var(--s-2) env(safe-area-inset-bottom);background:var(--surface);border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(3,1fr);align-items:stretch;z-index:40;}
 .bottom-nav-item{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s-1);background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:var(--s-1);}
 .bottom-nav-item.active{color:var(--text-primary);}
 .bottom-nav-item.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:32px;height:2px;border-radius:var(--r-pill);background:var(--accent);}
@@ -265,6 +265,7 @@ input.ios-switch:checked::after{transform:translateX(20px);background:var(--on-a
 .card-tabbed{position:relative;margin-top:var(--s-4);}
 .next-tab{position:absolute;right:var(--s-4);top:0;transform:translateY(-50%);z-index:2;max-width:70%;display:flex;align-items:center;gap:var(--s-1);height:24px;padding:0 var(--s-3);border-radius:var(--r-pill);background:var(--surface-2);border:1px solid var(--border);color:var(--text-primary);font-size:var(--fs-label);font-weight:var(--fw-title);cursor:pointer;}
 .next-tab::before{content:"";position:absolute;left:0;right:0;top:-10px;bottom:-10px;}
+.card-tabbed.flat .next-tab::before{top:0;bottom:0;}
 .next-tab-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* ===== Round 3: numbers and labels use the number font ===== */
@@ -280,7 +281,7 @@ svg text{font-family:var(--font-num);}
 .nav-lens{display:none;}
 [data-nav="glass"]{--tabbar-h:calc(76px + env(safe-area-inset-bottom) * 0.6);}
 [data-nav="glass"] .bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:min(calc(100% - 32px),400px);bottom:calc(var(--s-3) + env(safe-area-inset-bottom) * 0.6);height:auto;padding:6px;border-radius:var(--r-pill);border:1px solid var(--glass-border);background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);box-shadow:0 8px 28px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.12);}
-[data-nav="glass"] .nav-lens{display:block;position:absolute;top:5px;bottom:5px;left:6px;width:calc((100% - 12px) / 4);border-radius:var(--r-pill);background:var(--lens);border:1px solid var(--lens-border);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 3px 12px rgba(0,0,0,.2);transform:translateX(calc(var(--i, 1) * 100%));transition:transform .38s cubic-bezier(.3,1.35,.5,1);pointer-events:none;}
+[data-nav="glass"] .nav-lens{display:block;position:absolute;top:5px;bottom:5px;left:6px;width:calc((100% - 12px) / 3);border-radius:var(--r-pill);background:var(--lens);border:1px solid var(--lens-border);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 3px 12px rgba(0,0,0,.2);transform:translateX(calc(var(--i, 1) * 100%));transition:transform .38s cubic-bezier(.3,1.35,.5,1);pointer-events:none;}
 [data-nav="glass"] .bottom-nav-item{min-height:52px;}
 [data-nav="glass"] .bottom-nav-item.active::before{display:none;}
 
@@ -365,7 +366,7 @@ svg text{font-family:var(--font-num);}
 .digest-card2{background:none;border:none;border-radius:0;padding:0;}
 .card.flat{background:none;border:none;border-radius:0;padding-left:0;padding-right:0;}
 .card-tabbed.flat{margin-top:var(--s-2);}
-.card-tabbed.flat .next-tab{width:fit-content;position:static;transform:none;max-width:100%;height:auto;min-height:44px;margin:0 0 var(--s-1) auto;padding:0;background:none;border:none;color:var(--text-secondary);}
+.card-tabbed.flat .next-tab{width:fit-content;position:relative;transform:none;max-width:100%;height:auto;min-height:44px;margin:0 0 var(--s-1) auto;padding:0;background:none;border:none;color:var(--text-secondary);}
 
 /* ---- Round 8 ---- */
 @keyframes pfdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
@@ -394,7 +395,7 @@ svg text{font-family:var(--font-num);}
 
 [data-dotnums="on"]{--font-text:"Doto",ui-monospace,monospace !important;--font-num:"Doto",ui-monospace,monospace !important;}
 [data-dotnums="on"] *{font-weight:700 !important;letter-spacing:.03em;}
-[data-dotnums="on"] .axis-caption,[data-dotnums="on"] .info-body,[data-dotnums="on"] .helper,[data-dotnums="on"] .feedback-box,[data-dotnums="on"] textarea,[data-dotnums="on"] .warn,[data-dotnums="on"] .dup-prompt p,[data-dotnums="on"] .merge-panel p{font-family:var(--font-read,system-ui,sans-serif) !important;font-weight:400 !important;letter-spacing:0;}
+[data-dotnums="on"] .axis-caption,[data-dotnums="on"] .dg-text,[data-dotnums="on"] .ma-readout,[data-dotnums="on"] .plain-line,[data-dotnums="on"] .info-body,[data-dotnums="on"] .helper,[data-dotnums="on"] .feedback-box,[data-dotnums="on"] textarea,[data-dotnums="on"] .warn,[data-dotnums="on"] .dup-prompt p,[data-dotnums="on"] .merge-panel p{font-family:var(--font-read,system-ui,sans-serif) !important;font-weight:400 !important;letter-spacing:0;}
 [data-dotnums="on"] svg text{font-size:10px;}
 [data-dotnums="on"] .label-sm,[data-dotnums="on"] .st-label,[data-dotnums="on"] .cap,[data-dotnums="on"] .index-tag,[data-dotnums="on"] .dg-label{font-size:.8125rem;}
 [data-dotnums="on"] .pills.range-tabs .pill,[data-dotnums="on"] .pills-sub .pill-sm,[data-dotnums="on"] .unit-pill{font-size:.875rem;}
@@ -501,3 +502,35 @@ svg text{font-family:var(--font-num);}
 .tut-btns{display:flex;gap:var(--s-2);}
 .tut-btn{min-height:40px;padding:0 var(--s-4);border-radius:var(--r-input,10px);border:1.5px solid var(--accent);background:var(--accent);color:#000;font-weight:var(--fw-title);cursor:pointer;}
 .tut-btn.ghost{background:none;color:var(--text-secondary);border-color:var(--border);}
+
+/* ---- Round 18: Feed as its own circle ---- */
+.feed-fab{position:fixed;right:var(--s-3);bottom:calc(var(--tabbar-h) + var(--s-3));z-index:41;width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;padding:0;}
+.feed-fab.on{color:var(--text-primary);border-color:var(--accent);}
+.feed-fab svg{width:24px;height:24px;}
+.bottom-nav.feed-on .nav-lens{opacity:0;}
+[data-nav="glass"] .bottom-nav{left:var(--s-4);transform:none;width:min(calc(100% - 32px - 64px), 340px);}
+[data-nav="glass"] .feed-fab{right:var(--s-4);bottom:calc(var(--s-3) + env(safe-area-inset-bottom) * 0.6);width:64px;height:64px;background:var(--glass);border:1px solid var(--glass-border);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);box-shadow:0 8px 28px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.12);}
+[data-nav="glass"] .feed-fab.on{background:var(--lens);border-color:var(--lens-border);}
+
+/* ---- Round 20: simpler Overall screen ---- */
+.label-row{position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:var(--s-2);min-height:32px;}
+.ex-chip{position:absolute;left:0;top:50%;transform:translateY(-50%);min-height:32px;padding:0 var(--s-3);background:none;border:1px solid var(--border);border-radius:999px;color:var(--text-secondary);font-size:.8125rem;cursor:pointer;}
+.plain-line{display:block;margin-top:var(--s-1);font-size:.9375rem;color:var(--text-secondary);text-align:center;}
+.compare-chip{display:block;margin:var(--s-2) auto 0;min-height:36px;padding:0 var(--s-3);background:none;border:none;color:var(--accent);font-size:.875rem;cursor:pointer;}
+.overall-screen .log-set-row{background:var(--accent);border:none;border-radius:var(--r-input,12px);padding:0 var(--s-4);min-height:52px;margin:var(--s-4) 0 var(--s-3);}
+.overall-screen .log-set-row span{color:#000 !important;font-weight:var(--fw-title);}
+.overall-screen .log-set-row .lsr-due{font-size:.8125rem;opacity:.8;}
+.digest-card2 .dg-text{-webkit-line-clamp:2;}
+.pull-cue{gap:var(--s-2);opacity:.8;}
+.pull-cue .pc-text{font-size:.8125rem;}
+
+/* ---- Round 22: sides, custom days, orange delete circle ---- */
+.side-row{display:flex;gap:var(--s-2);flex-wrap:wrap;align-items:center;}
+.warm-row{flex-direction:row;flex-wrap:wrap;gap:var(--s-2);justify-content:center;}
+.newday-row{display:flex;gap:var(--s-2);align-items:center;margin-top:var(--s-3);}
+.newday-row input{flex:1;min-width:0;margin:0;}
+.del-btn .x-circle{border-color:var(--accent);color:var(--accent);width:22px;height:22px;}
+.del-btn.del-x{color:var(--accent);}
+.del-btn.del-x:active{color:var(--accent);opacity:.7;}
+.today-item .num{white-space:nowrap;}
+.today-item .del-btn{min-width:34px;}

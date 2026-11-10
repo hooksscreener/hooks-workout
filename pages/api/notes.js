@@ -54,7 +54,7 @@ export default async function handler(req, res) {
         ] }],
       }),
     });
-    if (!r.ok) return res.status(502).json({ error: "Notes request failed" });
+    if (!r.ok) { let d = ""; try { d = (await r.text()).slice(0, 300); } catch (e) { /* ignore */ } console.error("notes upstream", r.status, d); return res.status(502).json({ error: "Notes request failed", upstream: r.status, detail: d }); }
     const data = await r.json();
     const text = (data.content || []).map((c) => c.text || "").join("");
     const m = text.match(/\{[\s\S]*\}/);
@@ -73,6 +73,6 @@ export default async function handler(req, res) {
     const u = parsed.unit === "kg" || parsed.unit === "lbs" ? parsed.unit : null;
     return res.status(200).json({ lines, date, unit: u });
   } catch (err) {
-    return res.status(500).json({ error: "Notes error" });
+    console.error("notes error", err); return res.status(500).json({ error: "Notes error", detail: String(err && err.message || err).slice(0, 200) });
   }
 }

@@ -51,7 +51,7 @@ export default async function handler(req, res) {
         ] }],
       }),
     });
-    if (!r.ok) return res.status(502).json({ error: "Camera request failed" });
+    if (!r.ok) { let d = ""; try { d = (await r.text()).slice(0, 300); } catch (e) { /* ignore */ } console.error("identify upstream", r.status, d); return res.status(502).json({ error: "Camera request failed", upstream: r.status, detail: d }); }
     const data = await r.json();
     const text = (data.content || []).map((c) => c.text || "").join("");
     const match = text.match(/\{[\s\S]*\}/);
@@ -60,6 +60,6 @@ export default async function handler(req, res) {
     const muscle = MUSCLES.includes(parsed.muscle) ? parsed.muscle : "other";
     return res.status(200).json({ found: true, name: title(parsed.name), brand: title(parsed.brand), muscle });
   } catch (err) {
-    return res.status(500).json({ error: "Camera error" });
+    console.error("identify error", err); return res.status(500).json({ error: "Camera error", detail: String(err && err.message || err).slice(0, 200) });
   }
 }
