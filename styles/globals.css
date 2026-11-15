@@ -406,7 +406,7 @@ svg text{font-family:var(--font-num);}
 [data-dotnums="on"] .pills.range-tabs .pill.active .tab-l::after,[data-dotnums="on"] .pills-sub .pill-sm.active .tab-l::after{height:4px;bottom:-7px;border-radius:0;background:radial-gradient(circle at 2.5px 2px,var(--accent) 1.5px,transparent 1.9px) 0 0/5px 4px repeat-x;animation:dsweep .35s steps(10,end) both;}
 
 /* scorecard look: faint dot grid, corner ticks, dotted rules */
-[data-dotnums="on"] .card,[data-dotnums="on"] .card.flat{position:relative;background-image:radial-gradient(circle,color-mix(in srgb,var(--text-primary) 11%,transparent) 1px,transparent 1.4px);background-size:10px 10px;background-position:5px 5px;}
+[data-dotnums="on"] .card,[data-dotnums="on"] .card.flat{position:relative;}
 [data-dotnums="on"] :is(.card:not(.flat),.login-card,.rec-card,.dup-prompt,.merge-panel,.warn,.step-btn,.day-check,.week-tile,.gl-opt,.sw-edit,.rest-btns button,.undo-toast,.due-pill,.dropdown,.calendar,.suggestions,.ai-tag,.feedback-box,.swap-btn,.insight-item,.st-mini,input:not(.ios-switch):not([type=range]):not([type=checkbox]),select){border-style:dotted;}
 [data-dotnums="on"] :is(.section-block,.workout-section,.dg-sec,.sheet,.dropdown .new-row){border-top-style:dotted;}
 [data-dotnums="on"] .unit-pill{border-style:dotted;}
@@ -540,3 +540,46 @@ svg text{font-family:var(--font-num);}
 /* Tutorial: the overlay itself must not swallow taps, only its panels and bubble do, so the spotlighted hole is tappable. */
 .tut{pointer-events:none;}
 .tut-block,.tut-dim,.tut-bubble{pointer-events:auto;}
+
+/* ---- Round 28: icon-only nav, level Social circle, orange edit buttons, full-width swipe delete, sheet scroll lock ---- */
+[data-nav="glass"] .bottom-nav{height:64px;box-sizing:border-box;padding:5px;}
+[data-nav="glass"] .bottom-nav-item{min-height:0;}
+[data-nav="glass"] .nav-lens{top:4px;bottom:4px;left:5px;width:calc((100% - 10px) / 3);}
+[data-nav="glass"] .feed-fab-wrap{bottom:calc(var(--s-3) + env(safe-area-inset-bottom) * 0.6);padding:0;gap:0;}
+[data-nav="glass"] .feed-fab{width:64px;height:64px;}
+.bottom-nav-item svg{width:24px;height:24px;}
+.edit-ex-btn{background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--r-pill);padding:7px 16px;font-weight:var(--fw-title);font-size:var(--fs-label);cursor:pointer;margin:0 0 var(--s-2);}
+.xp-edit{margin:0 0 0 auto;}
+.swipe-wrap[data-side=""] .swipe-actions{opacity:0;}
+.swipe-wrap[data-side="l"] .swipe-actions{background:var(--loss);}
+.swipe-wrap[data-side="r"] .swipe-actions{background:var(--surface-2);}
+.swipe-wrap[data-side="l"] .sw-edit,.swipe-wrap[data-side="r"] .sw-del{visibility:hidden;}
+.swipe-body{background:transparent;}
+html.sheet-open,html.sheet-open body{overflow:hidden;overscroll-behavior:none;}
+.sheet{overscroll-behavior:contain;}
+.sheet-grip,.sheet-head{touch-action:none;}
+
+.plate-line{margin-top:4px;font-size:var(--fs-label);color:var(--text-secondary);}
+.plate-line b{color:var(--text-primary);font-weight:var(--fw-title);}
+
+/* ---- Round 36: centered letters in circles, feed scroll lock ---- */
+.info-dot{padding:1.5px 0 0 2px;box-sizing:border-box;}
+.fp-avatar{padding-left:3px;box-sizing:border-box;}
+html.feed-open,html.feed-open body{overflow:hidden;overscroll-behavior:none;}
+.feedpage{overscroll-behavior:contain;touch-action:pan-y;}
+
+/* ---- Round 38: Edit button sits on the Est. max change line ---- */
+.portfolio-change .index-tag.xp-tagline{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);}
+.xp-tagline .edit-ex-btn{margin:0;padding:5px 14px;letter-spacing:0;text-transform:none;font-size:var(--fs-label);}
+
+.compare-line{margin:10px 0 2px;font-size:var(--fs-label);color:var(--text-secondary);line-height:1.4;}
+
+.rec-top.tap{cursor:pointer;}
+.tut-text{white-space:pre-line;}
+/* Light mode: the dot-matrix font reads faint on white, so thicken it a touch */
+[data-theme="light"] body{-webkit-text-stroke:.35px currentColor;}
+[data-theme="light"] .ma-swatch,[data-theme="light"] .pull-cue,[data-theme="light"] .overall-screen .log-set-row .lsr-due{opacity:1;}
+.rec-last{white-space:nowrap;flex-shrink:0;}
+.rec-top > div:first-child{min-width:0;}
+/* Light mode: darker green, red and orange inside the digest */
+[data-theme="light"] .digest-card2{--gain:#0B5D1E;--loss:#9A1A10;--accent:#B03E00;}
