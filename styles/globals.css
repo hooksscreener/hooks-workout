@@ -750,3 +750,10 @@ html.scrub-lock,html.scrub-lock body{overflow:hidden !important;overscroll-behav
 .bd-heat{-webkit-overflow-scrolling:touch;scrollbar-width:none;}
 .bd-heat::-webkit-scrollbar{display:none;}
 @media (prefers-reduced-motion:reduce){.bd-grow,.bd-growy,.bd-fade{animation:none;}}
+
+/* Build 60: bars in the breakdown pages are dots like every other bar */
+.bd-bar{height:12px;}
+.bd-bar span{height:12px;opacity:1;}
+.bd-bar span,.bd-stack span{background-color:transparent;background-image:radial-gradient(circle at 2px 2px,var(--c) 1.35px,transparent 1.7px);background-size:4px 4px;}
+.bd-stack{height:12px;gap:2px;}
+.bd-head .bd-h:last-child{white-space:nowrap;flex:none;}
