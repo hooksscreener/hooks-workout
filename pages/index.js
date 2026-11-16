@@ -30,7 +30,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 45 · Nov 15";
+const BUILD_TAG = "Build 47 · Nov 15";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -2274,11 +2274,17 @@ export default function Home() {
   };
   // ---- Edit an exercise: name, brand, one side or both, which days ----
   const [editEx, setEditEx] = useState(null); // { orig, name, brand, oneSided, days, newDay, err }
+  const editDirty = () => !!editEx && editEx.snap !== JSON.stringify([editEx.name, editEx.brand, editEx.ticker || "", !!editEx.oneSided, !!editEx.barbell, [...editEx.days].sort()]);
+  const closeEdit = () => { if (editDirty() && !window.confirm("Discard your changes to this exercise?")) return; setEditEx(null); };
+  const closeNotes = () => { if (notesBusy) return; if (notesRows.some((r) => r.keep) && !window.confirm("Discard these lines without saving?")) return; setNotesOpen(false); setNotesRows([]); };
+  const closeTopSheetRef = useRef(null);
+  closeTopSheetRef.current = () => { if (editEx) closeEdit(); else if (notesOpen) closeNotes(); else if (settingsOpen) setSettingsOpen(false); };
+  useEffect(() => { const h = (e) => { if (e.key === "Escape" && closeTopSheetRef.current) closeTopSheetRef.current(); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
   const openEditEx = (name) => {
     const days = workouts.filter((w) => (exercises[w.id] || []).some((n) => n.toLowerCase() === name.toLowerCase())).map((w) => w.id);
     const m = exMeta[name] || {};
     setScanMsg("");
-    setEditEx({ orig: name, name, brand: m.brand || "", ticker: (tickers && tickers[name]) || "", oneSided: !!m.oneSided, barbell: barbellNow(name), days, newDay: "", err: "" });
+    setEditEx({ orig: name, name, brand: m.brand || "", ticker: (tickers && tickers[name]) || "", oneSided: !!m.oneSided, barbell: barbellNow(name), days, newDay: "", err: "", snap: JSON.stringify([name, m.brand || "", (tickers && tickers[name]) || "", !!m.oneSided, !!barbellNow(name), [...days].sort()]) });
   };
   const saveEditEx = () => {
     if (!editEx) return;
@@ -2329,19 +2335,48 @@ export default function Home() {
     if (!sheet) return undefined;
     document.documentElement.classList.add("sheet-open");
     let sy = 0, dy = 0, fromHead = false, active = false;
-    const onStart = (e) => { sy = e.touches[0].clientY; dy = 0; fromHead = !!(e.target.closest && e.target.closest(".sheet-grip,.sheet-head")); active = fromHead || sheet.scrollTop <= 0; };
+    let hist = []; // recent {y,t} samples for release velocity
+    const backdropEl = () => { const b = document.querySelectorAll(".sheet-backdrop"); return b[b.length - 1]; };
+    const rubber = (o, dim, c = 0.55) => (o * dim * c) / (dim + c * Math.abs(o)); // soft resistance when pulled up past the top
+    const onStart = (e) => {
+      sy = e.touches[0].clientY; dy = 0; hist = [{ y: sy, t: performance.now() }];
+      fromHead = !!(e.target.closest && e.target.closest(".sheet-grip,.sheet-head"));
+      active = fromHead || sheet.scrollTop <= 0;
+      // grab a sheet that is mid-flight: freeze it where it is on screen
+      const live = getComputedStyle(sheet).transform;
+      if (live && live !== "none") { const my = new DOMMatrix(live).m42; if (my > 1) { sheet.style.transition = "none"; sheet.style.transform = `translateY(${my}px)`; } }
+    };
     const onMove = (e) => {
       if (!active) return;
-      const d = e.touches[0].clientY - sy;
+      const y = e.touches[0].clientY, d = y - sy;
+      hist.push({ y, t: performance.now() }); if (hist.length > 6) hist.shift();
       if (d > 0 && (fromHead || sheet.scrollTop <= 0)) {
         e.preventDefault(); dy = d; sheet.style.transition = "none"; sheet.style.transform = `translateY(${d}px)`;
+        const bd = backdropEl(); if (bd) { bd.style.transition = "none"; bd.style.opacity = String(Math.max(0, 1 - d / Math.max(sheet.offsetHeight, 1))); }
+      } else if (d < 0 && fromHead) {
+        e.preventDefault(); dy = d; sheet.style.transition = "none"; sheet.style.transform = `translateY(${rubber(d, 300)}px)`;
       } else if (d < 0 && dy === 0) active = false;
     };
     const onEnd = () => {
       if (!dy) return;
-      sheet.style.transition = "transform .2s ease";
-      if (dy > 90) { sheet.style.transform = "translateY(105%)"; const bd = document.querySelectorAll(".sheet-backdrop"); setTimeout(() => { const b = bd[bd.length - 1]; if (b) b.click(); }, 170); }
-      else sheet.style.transform = "";
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const now = performance.now();
+      const a = hist.find((h) => now - h.t < 120) || hist[hist.length - 1], b = hist[hist.length - 1];
+      const v = a && b && b.t > a.t ? ((b.y - a.y) / (b.t - a.t)) * 1000 : 0; // px/s, + is downward
+      const projected = dy + (v / 1000) * 0.998 / (1 - 0.998); // where a flick would coast to
+      const bd = backdropEl();
+      if (dy > 0 && projected > 110) {
+        const remain = Math.max(sheet.offsetHeight - dy, 1);
+        const dur = reduce ? 0.12 : Math.min(0.32, Math.max(0.16, remain / Math.max(v, 600)));
+        sheet.style.transition = `transform ${dur}s cubic-bezier(.2,.8,.3,1)`; sheet.style.transform = "translateY(105%)";
+        if (bd) { bd.style.transition = `opacity ${dur}s ease`; bd.style.opacity = "0"; }
+        setTimeout(() => { const x = backdropEl(); if (x) x.click(); }, dur * 1000 - 20);
+      } else {
+        // flick-less release: settle back with a hint of overshoot only if the finger carried momentum
+        sheet.style.transition = reduce ? "transform .12s ease" : (Math.abs(v) > 300 ? "transform .38s cubic-bezier(.34,1.35,.64,1)" : "transform .3s cubic-bezier(.2,.8,.3,1)");
+        sheet.style.transform = "";
+        if (bd) { bd.style.transition = "opacity .25s ease"; bd.style.opacity = ""; }
+      }
       dy = 0;
     };
     sheet.addEventListener("touchstart", onStart, { passive: true });
@@ -3614,12 +3649,12 @@ export default function Home() {
 
       {editEx && (
         <>
-          <div className="sheet-backdrop" onClick={() => setEditEx(null)} />
+          <div className="sheet-backdrop" onClick={closeEdit} />
           <div className="sheet" role="dialog" aria-label="Edit exercise">
             <div className="sheet-grip" />
             <div className="sheet-head">
               <span className="sheet-title">Edit exercise</span>
-              <button className="close-btn" onClick={() => setEditEx(null)} aria-label="Close">✕</button>
+              <button className="close-btn" onClick={closeEdit} aria-label="Close">✕</button>
             </div>
             <button type="button" className="chip scan-btn" disabled={scanBusy} onClick={() => editScanRef.current && editScanRef.current.click()}>{scanBusy ? "Reading…" : "Scan machine with camera"}</button>
             <input ref={editScanRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => scanMachine(e.target.files && e.target.files[0], true)} />
@@ -3661,12 +3696,12 @@ export default function Home() {
       )}
       {notesOpen && (
         <>
-          <div className="sheet-backdrop" onClick={() => { if (!notesBusy) setNotesOpen(false); }} />
+          <div className="sheet-backdrop" onClick={closeNotes} />
           <div className="sheet notes-sheet" role="dialog" aria-label="Log from notes photo">
             <div className="sheet-grip" />
             <div className="sheet-head">
               <span className="sheet-title">Log from notes</span>
-              <button className="close-btn" onClick={() => setNotesOpen(false)} aria-label="Close" disabled={notesBusy}>✕</button>
+              <button className="close-btn" onClick={closeNotes} aria-label="Close" disabled={notesBusy}>✕</button>
             </div>
             <div className="helper" style={{ marginBottom: 8 }}>{notesMsg}</div>
             {notesRows.length > 0 && (
@@ -3796,19 +3831,19 @@ export default function Home() {
       )}
 
       {feedOpen && <FeedPage />}
-      <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><DotIcon rows={DOT_PEOPLE} color="currentColor" size={28} /></button></div>
+      <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><DotIcon rows={DOT_PEOPLE} color="currentColor" size={24} /><span>Feed</span></button></div>
 
       <div className={"bottom-nav" + (feedOpen ? " feed-on" : "")} ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
         <button aria-label="Overall" className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
-          <DotIcon rows={DOT_HOME} color="currentColor" />
+          <DotIcon rows={DOT_HOME} color="currentColor" /><span>Overall</span>
         </button>
         <button aria-label="Workout" className={"bottom-nav-item" + (!feedOpen && activeSection === "home" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("home"); }}>
-          <DotIcon rows={DOT_LIFT} color="currentColor" />
+          <DotIcon rows={DOT_LIFT} color="currentColor" /><span>Workout</span>
         </button>
         <button aria-label="Progress" className={"bottom-nav-item" + (!feedOpen && activeSection === "charts" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("charts"); }}>
-          <DotIcon rows={DOT_CHART} color="currentColor" />
+          <DotIcon rows={DOT_CHART} color="currentColor" /><span>Progress</span>
         </button>
 
       </div>

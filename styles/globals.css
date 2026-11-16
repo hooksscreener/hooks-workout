@@ -609,3 +609,33 @@ html.feed-open,html.feed-open body{overflow:hidden;overscroll-behavior:none;}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important;}
 }
+
+/* ---- Build 46: tab labels (HIG tab bars), 11pt minimum ---- */
+[data-nav="glass"] .bottom-nav{height:68px;}
+[data-nav="glass"] .feed-fab{width:68px;height:68px;flex-direction:column;gap:2px;}
+[data-nav="glass"] .bottom-nav-item{gap:2px;}
+.bottom-nav-item span,.feed-fab span{font-family:"IBM Plex Sans",-apple-system,sans-serif !important;font-size:11px;font-weight:600;line-height:1;letter-spacing:.01em;}
+.bottom-nav-item svg,.feed-fab svg{width:22px;height:22px;}
+.feed-fab{display:flex;align-items:center;justify-content:center;}
+
+/* ---- Build 47: apple-design skill pass ---- */
+/* Feedback on press, not release: instant, small, same everywhere */
+.chip,.pill,.btn-iron:not(.dock-save),.btn-danger,.unit-pill button,.bottom-nav-item,.feed-fab,.close-btn,.edit-ex-btn,.cam-btn,.compare-chip,.rec-top.tap{transition:transform 90ms ease-out,background-color .2s,color .2s,opacity .2s;}
+.chip:active,.pill:active,.btn-iron:not(.dock-save):active,.btn-danger:active,.bottom-nav-item:active,.feed-fab:active,.close-btn:active,.edit-ex-btn:active,.cam-btn:active,.compare-chip:active,.rec-top.tap:active{transform:scale(.96);}
+/* Sheet content should not be selectable while dragging the grip */
+.sheet-grip,.sheet-head{-webkit-user-select:none;user-select:none;}
+/* Reduced transparency: no blur, near solid surfaces */
+@media (prefers-reduced-transparency: reduce){
+  .bottom-nav,.feed-fab,.fill-slip,.sheet,.sheet-backdrop,.tut-bubble{-webkit-backdrop-filter:none !important;backdrop-filter:none !important;}
+  .sheet-backdrop{background:rgba(0,0,0,.7);}
+}
+/* Increased contrast: defined borders and stronger secondary text */
+@media (prefers-contrast: more){
+  :root{--border:var(--text-secondary);}
+  .bottom-nav,.feed-fab,.sheet,.chip,.pill{border-color:var(--text-secondary) !important;}
+  .bottom-nav-item{color:var(--text-primary);}
+}
+/* Reduced motion keeps comprehension cues: transforms off, fades kept */
+@media (prefers-reduced-motion: reduce){
+  .chip:active,.pill:active,.btn-iron:active,.bottom-nav-item:active,.feed-fab:active{transform:none;}
+}
