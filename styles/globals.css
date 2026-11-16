@@ -757,3 +757,6 @@ html.scrub-lock,html.scrub-lock body{overflow:hidden !important;overscroll-behav
 .bd-bar span,.bd-stack span{background-color:transparent;background-image:radial-gradient(circle at 2px 2px,var(--c) 1.35px,transparent 1.7px);background-size:4px 4px;}
 .bd-stack{height:12px;gap:2px;}
 .bd-head .bd-h:last-child{white-space:nowrap;flex:none;}
+.bd-bar span,.bd-stack span{background-repeat:space space;}
+.bd-stack{gap:4px;}
+.bd-stack span{min-width:4px;}
