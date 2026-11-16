@@ -30,9 +30,11 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 42 · Nov 15";
+const BUILD_TAG = "Build 45 · Nov 15";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
+const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
+const PENDING_KEY = "hooksPending"; // "1" while this phone has changes the server has not received yet
 
 const pad = (n) => String(n).padStart(2, "0");
 const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -575,7 +577,7 @@ function FeedPage({ source = mockSocial }) {
 function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
   const [activeIdx, setActiveIdx] = useState(null);
   const svgRef = useRef(null);
-  const W = 340, H = 210, padL = 34, padR = 14, padT = 10, padB = 24;
+  const W = 340, H = 210, padL = 38, padR = 14, padT = 10, padB = 24;
   const allVals = [];
   rows.forEach((r) => series.forEach((s) => { if (r[s] !== undefined) allVals.push(r[s]); }));
   const n = rows.length;
@@ -612,9 +614,9 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
       })
     : [];
 
-  const boxW = 176, lineH = 12;
+  const boxW = 212, lineH = 15; // Apple HIG: text no smaller than 11 pt
   const boxLineCount = activeLines.reduce((n2, l) => n2 + 1 + (l.detail ? l.detail.length : 0), 0);
-  const boxH = activeRow ? 20 + boxLineCount * lineH : 0;
+  const boxH = activeRow ? 22 + boxLineCount * lineH : 0;
   const boxX = activeRow ? Math.min(Math.max(x(activeIdx) - boxW / 2, 2), W - boxW - 2) : 0;
   const boxY = activeRow ? Math.max(padT + 2, 10) : 0;
 
@@ -636,7 +638,7 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + t * (H - padT - padB);
         const val = Math.round(max - t * (max - min));
-        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" /><text x={2} y={yy + 3} fontSize="9" fill="var(--text-secondary)">{val}</text></g>;
+        return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" /><text x={2} y={yy + 4} fontSize="11" fill="var(--text-secondary)">{val}</text></g>;
       })}
       {series.map((s, si) => {
         const pts = [];
@@ -644,7 +646,7 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
         return <polyline key={s} points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />;
       })}
       {n <= 24 && series.map((s, si) => rows.map((r, i) => r[s] !== undefined && <circle key={`${s}-${i}`} cx={x(i)} cy={y(r[s])} r="2.4" fill={LINE_COLORS[si % LINE_COLORS.length]} />))}
-      {ticks.map((tk, i) => <text key={i} x={padL + tk.pos * (W - padL - padR)} y={H - 6} fontSize="9" fill="var(--text-secondary)" textAnchor={tk.anchor}>{fmtDate(tk.date)}</text>)}
+      {ticks.map((tk, i) => <text key={i} x={padL + tk.pos * (W - padL - padR)} y={H - 6} fontSize="11" fill="var(--text-secondary)" textAnchor={tk.anchor}>{fmtDate(tk.date)}</text>)}
 
       {activeRow && (
         <g>
@@ -653,14 +655,14 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
             <circle key={l.series} cx={x(activeIdx)} cy={y(activeRow[l.series])} r={5} fill={l.color} stroke={INK} strokeWidth="1.5" />
           ))}
           <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="8" fill={CARD_INK} stroke="var(--border)" />
-          <text x={boxX + 8} y={boxY + 14} fontSize="9" fontWeight="700" fill="var(--text-secondary)">{activeRow.label}</text>
+          <text x={boxX + 8} y={boxY + 15} fontSize="11" fontWeight="700" fill="var(--text-secondary)">{activeRow.label}</text>
           {(() => {
             let lineIdx = 0;
             return activeLines.map((l) => {
               const rowsOut = [];
               rowsOut.push(<text key={`${l.series}-h`} x={boxX + 8} y={boxY + 14 + (++lineIdx) * lineH} fontSize="10" fontWeight="700" fill={l.color}>{l.text}</text>);
               if (l.detail) l.detail.forEach((d, di) => {
-                rowsOut.push(<text key={`${l.series}-d${di}`} x={boxX + 14} y={boxY + 14 + (++lineIdx) * lineH} fontSize="9" fontWeight="500" fill="var(--text-primary)">{d.exercise}: {d.weight} lbs × {d.reps}{d.sets > 1 ? ` × ${d.sets}` : ""}</text>);
+                rowsOut.push(<text key={`${l.series}-d${di}`} x={boxX + 14} y={boxY + 14 + (++lineIdx) * lineH} fontSize="11" fontWeight="500" fill="var(--text-primary)">{d.exercise}: {d.weight} lbs × {d.reps}{d.sets > 1 ? ` × ${d.sets}` : ""}</text>);
               });
               return rowsOut;
             });
@@ -916,7 +918,7 @@ const HONEY_COLORS = [
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "space-grotesk", fontNum: "jetbrains-mono", glass: true, gl: "ios", unit: "lbs", dotNums: true, bodyWeight: 0 };
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "ibm-plex-sans", fontV: 2, fontNum: "jetbrains-mono", glass: true, gl: "ios", unit: "lbs", dotNums: true, bodyWeight: 0 };
 const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
 const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
@@ -1032,6 +1034,17 @@ function digestBasic(stats) {
   return out;
 }
 
+// Dot-matrix icons: each row is a string, "#" = a dot. Matches the dotted heart and the dot-matrix type.
+function DotIcon({ rows, color, size = 26 }) {
+  const w = Math.max(...rows.map((r) => r.length)), h = rows.length;
+  const dots = [];
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === "#") dots.push(<circle key={x + "-" + y} cx={x + 0.5} cy={y + 0.5} r="0.4" />); });
+  return <svg width={size} height={size * h / w} viewBox={`0 0 ${w} ${h}`} fill={color} aria-hidden="true">{dots}</svg>;
+}
+const DOT_HOME = [".....#.....","....#.#....","...#...#...","..#.....#..",".#.......#.","..#.....#..","..#.###.#..","..#.#.#.#..","..#.#.#.#..","..#######.."];
+const DOT_LIFT = ["..##.....##..",".###.....###.","####.....####","#############","####.....####",".###.....###.","..##.....##.."];
+const DOT_CHART = ["........##.","........##.","........##.","........##.","....##..##.","....##..##.","....##..##.","##..##..##.","##..##..##.","##..##..##."];
+const DOT_PEOPLE = [".###.....###.",".###.....###.",".###.....###.",".............",".###.....###.","#####...#####","#####...#####"];
 const NAV_ICON_PROPS = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
 function IconHome({ color, size }) { return <svg {...NAV_ICON_PROPS} width={size || NAV_ICON_PROPS.width} height={size || NAV_ICON_PROPS.height} stroke={color}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></svg>; }
 function IconPortfolio({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 20V15l5.5-5.5 3.5 3.5 6-7.5 4 3.5V20z" fill={color} fillOpacity=".3" stroke="none" /><path d="M2.5 15l5.5-5.5 3.5 3.5 6-7.5 4 3.5" fill="none" /></svg>; }
@@ -1370,7 +1383,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
   const svgRef = useRef(null);
   const k = useSvgScale(svgRef);
   const dotGap = MAIN_DOT_GAP / k, dotR = (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? 1.15 : 0.9) / k;
-  const labelW = 26, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
+  const labelW = 30, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
   const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
   const colorFor = () => "var(--accent)";
@@ -1388,7 +1401,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
       })) : weeks.map((week, wi) => week.map((day, di) => (
         <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" fill={day.future ? "none" : day.count === 0 ? "var(--border)" : colorFor(day.count)} fillOpacity={1} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
-      {DAYS.map((d, di) => <text key={d} x={W - labelW + 6} y={di * (cell + gap) + cell / 2 + 3} fontSize="9" fill="var(--text-primary)">{d}</text>)}
+      {DAYS.map((d, di) => <text key={d} x={W - labelW + 6} y={di * (cell + gap) + cell / 2 + 4} fontSize="11" fill="var(--text-primary)">{d}</text>)}
     </svg>
   );
 }
@@ -1588,6 +1601,7 @@ export default function Home() {
   const [restTimes, setRestTimes] = useState({});
   const [exMeta, setExMeta] = useState({}); // { [exercise]: { brand, oneSided } }
   const [saveError, setSaveError] = useState(null);
+  const [pendingSync, setPendingSync] = useState(false); // true while changes are saved on this phone but not yet on the server
 
   const [activeWorkoutId, setActiveWorkoutId] = useState("push");
   const [selectedDate, setSelectedDate] = useState(todayISO());
@@ -1626,14 +1640,25 @@ export default function Home() {
 
   const loadData = async (code) => {
     try {
-      const res = await fetch("/api/data", { headers: { "x-app-passcode": code } });
-      if (res.status === 401) {
-        setAuthError("Wrong passcode.");
-        localStorage.removeItem(PASSCODE_KEY);
-        setPasscode("");
-        return;
+      let cached = null, pending = false;
+      try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); pending = localStorage.getItem(PENDING_KEY) === "1"; } catch (e) { /* ignore */ }
+      let data = null;
+      try {
+        const res = await fetch("/api/data", { headers: { "x-app-passcode": code } });
+        if (res.status === 401) {
+          setAuthError("Wrong passcode.");
+          localStorage.removeItem(PASSCODE_KEY);
+          setPasscode("");
+          return;
+        }
+        data = await res.json();
+      } catch (e) {
+        if (!cached) throw e; // offline and nothing saved on this phone yet
+        data = cached;
+        setPendingSync(true);
       }
-      const data = await res.json();
+      if (pending && cached) { data = cached; setPendingSync(true); } // this phone has newer changes than the server: keep them and send them up
+      else if (data && data.entries) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ } }
       let nextWorkouts = data.workouts || DEFAULT_WORKOUTS;
       let nextExercises = data.exercises || DEFAULT_EXERCISES;
       let nextEntries = data.entries || [];
@@ -1668,7 +1693,7 @@ export default function Home() {
       setLoaded(true);
       setAuthError(null);
     } catch {
-      setAuthError("Couldn't reach the server — check your connection.");
+      setAuthError("Couldn't reach the server. Check your connection.");
     }
   };
 
@@ -1697,7 +1722,7 @@ export default function Home() {
 
   // ---- Look & feel: dark / light / system and one accent color, remembered on this device ----------
   useEffect(() => {
-    try { const raw = localStorage.getItem("hooksSettings"); if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw), glass: true }); } catch (e) { /* ignore */ }
+    try { const raw = localStorage.getItem("hooksSettings"); if (raw) { const st = JSON.parse(raw); if (st.fontV !== 2) { st.fontText = "ibm-plex-sans"; st.fontV = 2; } setSettings({ ...DEFAULT_SETTINGS, ...st, glass: true }); } } catch (e) { /* ignore */ }
   }, []);
   useIsoLayoutEffect(() => {
     const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
@@ -1770,11 +1795,62 @@ export default function Home() {
     setRestTimes(payload.restTimes || {});
     setExMeta(payload.exMeta || {});
     setWorkouts(payload.workouts); setExercises(payload.exercises); setEntries(payload.entries); setRestDays(payload.restDays); setProgressionMode(payload.progressionMode);
-    try {
-      const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: JSON.stringify(payload) });
-      setSaveError(res.ok ? null : "Couldn't save — try again.");
-    } catch { setSaveError("Couldn't save — check your connection."); }
+    // Always keep a copy on this phone first, so nothing is lost if the connection drops.
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); localStorage.setItem(PENDING_KEY, "1"); } catch (e) { /* ignore */ }
+    setPendingSync(true);
+    await flushPending();
   };
+  // Sends the copy saved on this phone to the server. Safe to call any time; it does nothing when there is nothing waiting.
+  const flushingRef = useRef(false);
+  const flushPending = async () => {
+    if (flushingRef.current) return;
+    let raw = null;
+    try { if (localStorage.getItem(PENDING_KEY) !== "1") { setPendingSync(false); return; } raw = localStorage.getItem(CACHE_KEY); } catch (e) { return; }
+    if (!raw || !passcode) return;
+    flushingRef.current = true;
+    try {
+      const res = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json", "x-app-passcode": passcode }, body: raw });
+      if (res.ok) {
+        // If another change was saved while this one was sending, the cache is newer than what we sent: keep waiting.
+        let same = true; try { same = localStorage.getItem(CACHE_KEY) === raw; if (same) localStorage.removeItem(PENDING_KEY); } catch (e) { /* ignore */ }
+        setSaveError(null); setPendingSync(!same);
+        if (!same) { flushingRef.current = false; return flushPending(); }
+      } else setSaveError("Couldn't save to the server. Your changes are kept on this phone and will retry.");
+    } catch { /* offline: stays pending, retried automatically */ }
+    flushingRef.current = false;
+  };
+  useEffect(() => {
+    if (!passcode) return undefined;
+    const go = () => { flushPending(); };
+    window.addEventListener("online", go);
+    document.addEventListener("visibilitychange", go);
+    const iv = setInterval(go, 20000);
+    go();
+    return () => { window.removeEventListener("online", go); document.removeEventListener("visibilitychange", go); clearInterval(iv); };
+    // eslint-disable-next-line
+  }, [passcode, loaded]);
+  useEffect(() => { try { if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); } catch (e) { /* ignore */ } }, []);
+  // Apple HIG: follow the iPhone's text size setting (Dynamic Type). On iOS the system body font tells us the chosen size;
+  // we scale the root font so every rem-based size grows with it. Capped so layouts stay usable.
+  useEffect(() => {
+    let probe;
+    try {
+      if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return undefined;
+      probe = document.createElement("span");
+      probe.textContent = "x";
+      probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;font:-apple-system-body;";
+      document.body.appendChild(probe);
+      const apply = () => {
+        const px = parseFloat(getComputedStyle(probe).fontSize) || 17;
+        const ratio = Math.min(Math.max(px / 17, 1), 1.5);
+        document.documentElement.style.fontSize = ratio === 1 ? "" : `${16 * ratio}px`;
+      };
+      apply();
+      window.addEventListener("resize", apply);
+      document.addEventListener("visibilitychange", apply);
+      return () => { window.removeEventListener("resize", apply); document.removeEventListener("visibilitychange", apply); if (probe && probe.parentNode) probe.parentNode.removeChild(probe); };
+    } catch (e) { return undefined; }
+  }, []);
 
   const setProgressionModeAndSave = (mode) => {
     persist({ workouts, exercises, entries, restDays, progressionMode: mode });
@@ -2118,6 +2194,7 @@ export default function Home() {
     draftsRef.current[exerciseName] = { weight: form.weight, sets: form.sets, reps: form.reps };
     setRecentExercises((r) => [exerciseName, ...r.filter((n) => n !== exerciseName)].slice(0, 8));
     fx("click");
+    { const n = entries.filter((e) => e.exercise === exerciseName && e.date === selectedDate).length + 1; setFillSlip({ name: exerciseName, line: `${fmtNum(W(entry.weight))} ${unit} x ${entry.reps}`, n }); clearTimeout(fillTimer.current); fillTimer.current = setTimeout(() => setFillSlip(null), 3200); }
     if (!form.isWarmup) startRest(exerciseName);
     setForm((f) => ({ ...f, exercise: exerciseName, isWarmup: false }));
     if (allExerciseNames.some((n) => n.toLowerCase() === exerciseName.toLowerCase()) || nextExercises !== exercises) setRecExercise(exerciseName);
@@ -2449,7 +2526,7 @@ export default function Home() {
 
   // Everything lives on one continuously scrolling page; the bottom nav just scrolls to a section.
   const sectionRefs = useRef({});
-  const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  const scrollToSection = (key) => { sectionRefs.current[key]?.scrollIntoView({ behavior: (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? "auto" : "smooth", block: "start" }); };
   const [activeSection, setActiveSection] = useState("portfolio");
   const [dockVisible, setDockVisible] = useState(false);
   const [feedOpen, setFeedOpen] = useState(false);
@@ -2824,6 +2901,8 @@ export default function Home() {
   const [xEdit, setXEdit] = useState(false);
   const [xScrub, setXScrub] = useState(null);
   const [undoDel, setUndoDel] = useState(null);     // { entry, index }
+  const [fillSlip, setFillSlip] = useState(null);   // trade-confirmation style receipt after logging a set
+  const fillTimer = useRef(null);
   const undoTimer = useRef(null);
   const openExercise = (exercise, date, ytd) => { setXpage({ exercise, date, ytd: !!ytd, range: ytd ? "ytd" : "all" }); setXEdit(false); setXScrub(null); setEditingId(null); };
   const closeExercise = () => { setXpage(null); setXEdit(false); setXScrub(null); setEditingId(null); };
@@ -2983,6 +3062,7 @@ export default function Home() {
       <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
+      {pendingSync && !saveError && <div className="sync-note">Offline or saving. Your changes are kept on this phone and sync automatically.</div>}
 
       {!loaded ? (
         <div className="empty">Loading your log…</div>
@@ -3116,7 +3196,7 @@ export default function Home() {
                   setForm({ ...form, exercise: val });
                   if (!exact) setRecExercise(null);
                 }}
-                onFocus={(e) => { setShowSuggestions(true); setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 300); }}
+                onFocus={(e) => { setShowSuggestions(true); setTimeout(() => e.target.scrollIntoView({ behavior: (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? "auto" : "smooth", block: "center" }), 300); }}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
               />
               {form.exercise.trim() && <ClearX label="Clear exercise" onClick={clearForm} />}
@@ -3181,8 +3261,8 @@ export default function Home() {
                 <div className="rec-note">{cvText(recommendation.note)}</div>
                 <div className="today-list" style={{ marginTop: 8 }}>
                   {recommendation.rows.map((r) => (
-                    <div key={r.set} className="today-item" style={{ padding: "8px 12px" }}>
-                      <span style={{ fontWeight: 600 }}>Set {r.set}{r.set === 1 ? " (top)" : ""}</span>
+                    <div key={r.set} className={"today-item" + (r.set === 1 ? " top-set" : " sub-set")} style={{ padding: "8px 12px" }}>
+                      <span style={{ fontWeight: 600 }}>{r.set === 1 ? "Top set" : `Set ${r.set}`}</span>
                       <span className="num">{Wrec(r.weight)}<span className="muted">{unit}</span><span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
                     </div>
                   ))}
@@ -3433,6 +3513,13 @@ export default function Home() {
         </>
       )}
 
+      {fillSlip && (
+        <div className="fill-slip" role="status">
+          <span className="fill-tag">Filled</span>
+          <span className="fill-main">{fillSlip.name}</span>
+          <span className="fill-line">{fillSlip.line} · set {fillSlip.n} today</span>
+        </div>
+      )}
       {exUndo && (
         <div className="undo-toast" role="status">
           <span>Deleted {exUndo.name} ({exUndo.count} {exUndo.count === 1 ? "set" : "sets"})</span>
@@ -3709,19 +3796,19 @@ export default function Home() {
       )}
 
       {feedOpen && <FeedPage />}
-      <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><IconFeed color="currentColor" /></button></div>
+      <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><DotIcon rows={DOT_PEOPLE} color="currentColor" size={28} /></button></div>
 
       <div className={"bottom-nav" + (feedOpen ? " feed-on" : "")} ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
         <button aria-label="Overall" className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
-          <IconHome color="currentColor" size={24} />
+          <DotIcon rows={DOT_HOME} color="currentColor" />
         </button>
         <button aria-label="Workout" className={"bottom-nav-item" + (!feedOpen && activeSection === "home" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("home"); }}>
-          <IconDumbbellTilt color="currentColor" />
+          <DotIcon rows={DOT_LIFT} color="currentColor" />
         </button>
         <button aria-label="Progress" className={"bottom-nav-item" + (!feedOpen && activeSection === "charts" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("charts"); }}>
-          <IconPortfolio color="currentColor" />
+          <DotIcon rows={DOT_CHART} color="currentColor" />
         </button>
 
       </div>

@@ -18,10 +18,15 @@ export default function Document() {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Hooks Workout" />
         <meta name="theme-color" content="#000000" />
-        <title>Hooks Workout</title>
+        <title>Capital Gains: strength tracker</title>
+        <meta name="description" content="Track every lift and never stall. Log sets, see your strength as a stock chart, and get a target for your next session." />
+        <meta property="og:title" content="Capital Gains" />
+        <meta property="og:description" content="Track every lift and never stall." />
+        <meta property="og:image" content="/og.png" />
+        <meta name="twitter:card" content="summary_large_image" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches,s.gl);var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontText,s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}if(s.dotNums!==false){r.setAttribute('data-dotnums','on');}}catch(e){}})();`,
+            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches,s.gl);var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontV===2?s.fontText:'ibm-plex-sans',s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}if(s.dotNums!==false){r.setAttribute('data-dotnums','on');}}catch(e){}})();`,
           }}
         />
       </Head>
