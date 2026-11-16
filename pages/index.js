@@ -1,3 +1,7 @@
+import { LEGAL_DOCS } from "../lib/legal";
+import Breakdown from "../lib/Breakdown";
+import { growthByCategory } from "../lib/analysis";
+import { LegalBody } from "../lib/LegalPage";
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import { deriveTheme, deriveFonts } from "../lib/theme";
 import { filterFeed, FEED_MODES } from "../lib/feedFilter";
@@ -30,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 50 · Nov 15";
+const BUILD_TAG = "Build 56 · Nov 16";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -94,11 +98,16 @@ const CARD_INK = "var(--surface)";
 // Epley, but reps above 10 count as 10: the formula is only dependable up to about 10 reps, and past
 // that it keeps adding ~3% per rep, which reads like a max nobody could actually lift.
 const E1RM_REP_CAP = 10;
-const estE1RM = (weight, reps) => (reps > 0 ? Math.round(weight * (1 + Math.min(reps, E1RM_REP_CAP) / 30)) : weight);
+const BW_REP_CAP = 30; // bodyweight lifts (pull-ups, dips) are done for higher reps, so a higher cap lets rep gains show up
+const estE1RM = (weight, reps, bw = false) => (reps > 0 ? Math.round(weight * (1 + Math.min(reps, bw ? BW_REP_CAP : E1RM_REP_CAP) / 30)) : weight);
+const e1 = (e) => estE1RM(e.weight, e.reps, !!e.bw); // est. 1RM of an entry; entries flagged bw use the higher rep cap
+// How a set's weight reads on screen. Bodyweight sets say BW plus whatever was added.
+const bwLabel = (added, W, unit) => (added > 0 ? `BW + ${W(added)} ${unit}` : added < 0 ? `BW - ${W(-added)} ${unit}` : "BW");
+const setWt = (e, W, unit, isBwEx = false) => (e.bw ? bwLabel(e.added, W, unit) : isBwEx || !(e.weight > 0) ? bwLabel(e.weight || 0, W, unit) : `${W(e.weight)} ${unit}`);
 
 // The one set that represents a day for an exercise: highest score on the chosen metric, then the
 // heavier weight, then more reps (so 225x8 beats 225x6 logged the same day).
-const setScore = (e, metric) => (metric === "weight" ? e.weight : metric === "reps" ? e.reps : estE1RM(e.weight, e.reps));
+const setScore = (e, metric) => (metric === "weight" ? e.weight : metric === "reps" ? e.reps : e1(e));
 const pickBest = (cur, e, metric = "e1rm") => {
   if (!cur) return e;
   const a = setScore(e, metric), b = setScore(cur, metric);
@@ -126,16 +135,24 @@ function useHoldScrub(getIndex, onIndex, elRef) {
     const el = elRef && elRef.current;
     if (!el || attached.current === el) return undefined;
     attached.current = el;
-    const guard = (ev) => { if (mode.current === "scrub" && ev.cancelable) ev.preventDefault(); };
+    const guard = (ev) => { if (mode.current === "scrub") { if (ev.cancelable) ev.preventDefault(); holdPage(); } };
     el.addEventListener("touchmove", guard, { passive: false });
     return undefined;
   });
+  // While scrubbing, the page must not move at all, even if the finger drifts up or down. Three layers,
+  // because iOS sometimes makes touchmove uncancelable once it has started a pan: cancel the move,
+  // freeze the page with overflow hidden, and snap back if it moved anyway.
+  const pageY = useRef(0);
+  const lockPage = () => { pageY.current = window.scrollY; document.documentElement.classList.add("scrub-lock"); };
+  const holdPage = () => { if (window.scrollY !== pageY.current) window.scrollTo(0, pageY.current); };
+  const unlockPage = () => { document.documentElement.classList.remove("scrub-lock"); };
+  useEffect(() => unlockPage, []);
   const onPointerDown = (e) => {
     if (e.pointerType === "touch") {
       mode.current = "pending";
       start.current = { x: e.clientX, y: e.clientY };
       clearTimer();
-      timer.current = setTimeout(() => { if (mode.current === "pending") { mode.current = "scrub"; apply(start.current.x); } }, HOLD_MS);
+      timer.current = setTimeout(() => { if (mode.current === "pending") { mode.current = "scrub"; lockPage(); apply(start.current.x); } }, HOLD_MS);
     } else {
       mode.current = "scrub";
       apply(e.clientX);
@@ -146,11 +163,11 @@ function useHoldScrub(getIndex, onIndex, elRef) {
     if (mode.current === "pending") {
       const dx = e.clientX - start.current.x, dy = e.clientY - start.current.y;
       if (Math.abs(dy) > MOVE && Math.abs(dy) > Math.abs(dx)) { mode.current = "scroll"; clearTimer(); return; }
-      if (Math.abs(dx) > MOVE) { mode.current = "scrub"; clearTimer(); apply(e.clientX); return; }
+      if (Math.abs(dx) > MOVE) { mode.current = "scrub"; clearTimer(); lockPage(); apply(e.clientX); return; }
     }
-    if (mode.current === "scrub") apply(e.clientX);
+    if (mode.current === "scrub") { holdPage(); apply(e.clientX); }
   };
-  const end = () => { clearTimer(); if (mode.current === "scrub") onIndex(null); mode.current = null; };
+  const end = () => { clearTimer(); if (mode.current === "scrub") onIndex(null); mode.current = null; unlockPage(); };
   return { onPointerDown, onPointerMove, onPointerUp: end, onPointerCancel: end, onPointerLeave: end };
 }
 const NO_SELECT = { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
@@ -162,7 +179,7 @@ function buildExSeries(list, fromISO, toISOd, repsMode = false) {
   list.forEach((e) => { if (!e.isWarmup) byDay[e.date] = pickBest(byDay[e.date], e, repsMode ? "reps" : "e1rm"); });
   const dates = Object.keys(byDay).sort().filter((d) => d >= fromISO && d <= toISOd);
   if (dates.length < 2) return null;
-  const val = (d) => (repsMode ? byDay[d].reps : estE1RM(byDay[d].weight, byDay[d].reps));
+  const val = (d) => (repsMode ? byDay[d].reps : e1(byDay[d]));
   const base = val(dates[0]);
   const rows = [];
   let cur = base;
@@ -178,10 +195,10 @@ function buildExSeries(list, fromISO, toISOd, repsMode = false) {
 // plus whatever you added. With no body weight saved, fall back to counting reps so the numbers still make sense.
 function bodyweightInfo(list, bodyWeight) {
   const work = list.filter((e) => !e.isWarmup);
-  const isBw = work.some((e) => !e.weight);
+  const isBw = work.some((e) => !(e.weight > 0));
   if (!isBw) return { list, isBw: false, repsMode: false, hasBw: false };
-  if (bodyWeight > 0) return { list: list.map((e) => ({ ...e, weight: (e.weight || 0) + bodyWeight })), isBw: true, repsMode: false, hasBw: true };
-  return { list, isBw: true, repsMode: true, hasBw: false, mixed: work.some((e) => e.weight > 0) };
+  if (bodyWeight > 0) return { list: list.map((e) => ({ ...e, bw: true, added: e.weight || 0, weight: Math.max(5, (e.weight || 0) + bodyWeight) })), isBw: true, repsMode: false, hasBw: true };
+  return { list, isBw: true, repsMode: true, hasBw: false, mixed: work.some((e) => e.weight > 0), assisted: work.some((e) => e.weight < 0) };
 }
 
 // Plates per side for a barbell lift (lbs). Greedy fill from the biggest plate; says so if the weight can't be loaded exactly.
@@ -206,10 +223,11 @@ function guessBarbell(name) {
 
 // A plain-English read on one exercise, built only from the logged numbers.
 function exSummary(name, series, list, per, W = (v) => v, repsMode = false) {
+  const setLbl = (e) => (e.bw ? (e.added > 0 ? `BW + ${W(e.added)}` : e.added < 0 ? `BW - ${W(-e.added)}` : "BW") : W(e.weight));
   if (!series) return `Not enough sessions of ${name} in this range yet. Log it a couple more times and a trend shows up here.`;
   const parts = [`${series.sessions} sessions ${per}.`];
   if (repsMode) parts.push(`Best set went from ${series.first.reps} to ${series.latest.reps} reps, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}%.`);
-  else parts.push(`Best set went from ${W(series.first.weight)} x ${series.first.reps} to ${W(series.latest.weight)} x ${series.latest.reps}, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}% in estimated 1RM.`);
+  else parts.push(`Best set went from ${setLbl(series.first)} x ${series.first.reps} to ${setLbl(series.latest)} x ${series.latest.reps}, ${series.pct >= 0 ? "up" : "down"} ${Math.abs(series.pct)}% in estimated 1RM.`);
   if (series.e1rmNow >= series.e1rmBest) parts.push("The latest session is your best in this range.");
   else parts.push(`Your best ${repsMode ? "reps in a set in this range were " + series.e1rmBest : "estimated 1RM in this range was " + W(series.e1rmBest)}, so you are ${Math.round(((series.e1rmBest - series.e1rmNow) / series.e1rmBest) * 100)}% under it.`);
   if (plateauFlag(list.filter((e) => !e.isWarmup))) parts.push("It has held steady for the last 3 sessions.");
@@ -219,7 +237,7 @@ function exSummary(name, series, list, per, W = (v) => v, repsMode = false) {
 
 const KG_PER_LB = 0.45359237;
 const r1 = (n) => Math.round(n * 10) / 10;
-const estE5RM = (weight, reps) => Math.round(estE1RM(weight, reps) / (1 + 5 / 30));
+const estE5RM = (weight, reps, bw = false) => Math.round(estE1RM(weight, reps, bw) / (1 + 5 / 30));
 const fmtNum = (n) => Math.round(n).toLocaleString("en-US");
 const defaultTicker = (name) => {
   // Consonants only, up to 5, spread across the words (Bench Press -> BNCPR).
@@ -241,7 +259,7 @@ function exStats(list, fromISO, toISOd, repsMode = false) {
   if (!work.length) return null;
   const vol = (arr) => arr.reduce((a, e) => a + e.weight * Math.max(e.reps, 0) * (e.sets || 1), 0);
   const inR = work.filter((e) => e.date >= fromISO && e.date <= toISOd);
-  const best = work.reduce((b, e) => (!b || (repsMode ? e.reps > b.reps : estE1RM(e.weight, e.reps) > estE1RM(b.weight, b.reps)) ? e : b), null);
+  const best = work.reduce((b, e) => (!b || (repsMode ? e.reps > b.reps : e1(e) > e1(b)) ? e : b), null);
   const pr = work.reduce((b, e) => (!b || (repsMode ? e.reps > b.reps : e.weight > b.weight) ? e : b), null);
   const reps = inR.reduce((a, e) => a + Math.max(e.reps, 0) * (e.sets || 1), 0);
   const sets = inR.reduce((a, e) => a + (e.sets || 1), 0);
@@ -249,9 +267,9 @@ function exStats(list, fromISO, toISOd, repsMode = false) {
   const last = work.reduce((b, e) => (!b || e.date > b.date ? e : b), null);
   const allDates = [...new Set(work.map((e) => e.date))].sort();
   return {
-    e1rm: repsMode ? best.reps : estE1RM(best.weight, best.reps), e5rm: repsMode ? Math.round(inR.reduce((a, e) => a + e.reps, 0) / Math.max(inR.length, 1)) : estE5RM(best.weight, best.reps),
+    e1rm: repsMode ? best.reps : e1(best), e5rm: repsMode ? Math.round(inR.reduce((a, e) => a + e.reps, 0) / Math.max(inR.length, 1)) : estE5RM(best.weight, best.reps, !!best.bw),
     volume: vol(inR), sessions: dates.length, sets, reps,
-    prWeight: repsMode ? pr.reps : pr.weight, prDate: pr.date,
+    prWeight: repsMode ? pr.reps : pr.weight, prEntry: pr, prDate: pr.date,
     avgPerRep: reps > 0 ? Math.round(vol(inR) / reps) : 0,
     lastDate: last.date, lastSet: last,
     allVolume: vol(work), firstDate: allDates[0], allSessions: allDates.length,
@@ -696,7 +714,7 @@ function plateauFlag(history) {
   if (distinctDates.length < 3) return false;
   const recent = distinctDates.slice(0, 3).map((d) => {
     const top = history.filter((e) => e.date === d).reduce((best, e) => pickBest(best, e), null);
-    return estE1RM(top.weight, top.reps);
+    return e1(top);
   });
   const maxE = Math.max(...recent), minE = Math.min(...recent);
   if (!maxE) return false;
@@ -731,20 +749,21 @@ function planNext(hist, mode, todayIso) {
 
   let streak = 0;
   for (const d of dates) {
-    const dayTop = ws.filter((e) => e.date === d).reduce((m, e) => Math.max(m, e.weight), 0);
+    const dayTop = ws.filter((e) => e.date === d).reduce((m, e) => Math.max(m, e.weight), -Infinity);
     if (dayTop === topW) streak++; else break;
   }
 
   const plateaued = plateauFlag(ws);
   const bumpSize = topW >= 100 ? 10 : 5;
+  const tw = topW < 0 ? `BW - ${-topW} lbs` : topW === 0 ? "BW" : `${tw}`; // how the top weight reads in notes
   let nextTopWeight = topW, low, high, note, bumped = false;
 
   if (mode !== "reps" && lastTop.reps >= REC_HIGH) {
     bumped = true;
-    note = `You hit ${lastTop.reps} reps last time (top of the ${REC_LOW}–${REC_HIGH} range). Adding ${bumpSize} lbs; reps reset to ${REC_LOW}–${REC_HIGH}.`;
+    note = `You hit ${lastTop.reps} reps last time (top of the ${REC_LOW}–${REC_HIGH} range). ${topW < 0 ? "Cutting the assist by" : "Adding"} ${bumpSize} lbs; reps reset to ${REC_LOW}–${REC_HIGH}.`;
   } else if (mode !== "reps" && plateaued && enoughRepsAtWeight) {
     bumped = true;
-    note = `Strength has been flat for 3 sessions and you've done ${REC_LOW}+ reps on ${totalSets >= PLATEAU_SETS_NEEDED ? `${PLATEAU_SETS_NEEDED}+ sets` : "every set"} at ${topW} lbs. Adding ${bumpSize} lbs; reps reset to ${REC_LOW}–${REC_HIGH}.`;
+    note = `Strength has been flat for 3 sessions and you've done ${REC_LOW}+ reps on ${totalSets >= PLATEAU_SETS_NEEDED ? `${PLATEAU_SETS_NEEDED}+ sets` : "every set"} at ${tw}. ${topW < 0 ? "Cutting the assist by" : "Adding"} ${bumpSize} lbs; reps reset to ${REC_LOW}–${REC_HIGH}.`;
   }
 
   if (bumped) {
@@ -756,11 +775,11 @@ function planNext(hist, mode, todayIso) {
     const target = low === high ? `${low}` : `${low}–${high}`;
     const lastBit = lastTop.reps < bestReps ? ` (last time ${lastTop.reps})` : "";
     if (mode === "reps") {
-      note = `Weight is held on purpose. Your best at ${topW} lbs in the last 8 weeks is ${bestReps} reps${lastBit}. Aim for ${target}.`;
+      note = `Weight is held on purpose. Your best at ${tw} in the last 8 weeks is ${bestReps} reps${lastBit}. Aim for ${target}.`;
     } else if (plateaued) {
-      note = `Strength has been flat for 3 sessions, but you haven't had ${PLATEAU_SETS_NEEDED} sets of ${REC_LOW}+ reps at ${topW} lbs yet, so no weight increase. Your best in the last 8 weeks is ${bestReps} reps${lastBit}. Aim for ${target}.`;
+      note = `Strength has been flat for 3 sessions, but you haven't had ${PLATEAU_SETS_NEEDED} sets of ${REC_LOW}+ reps at ${tw} yet, so no weight increase. Your best in the last 8 weeks is ${bestReps} reps${lastBit}. Aim for ${target}.`;
     } else {
-      note = `Your best at ${topW} lbs in the last 8 weeks is ${bestReps} reps${lastBit}. Same weight: aim for ${target}.`;
+      note = `Your best at ${tw} in the last 8 weeks is ${bestReps} reps${lastBit}. Same weight: aim for ${target}.`;
     }
     if (streak >= 6) note += ` Same weight for ${streak} sessions in a row: consider a lighter week or a variation.`;
   }
@@ -955,7 +974,7 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
   const sess = (arr) => new Set(arr.map((e) => e.date)).size;
   const setsOf = (arr) => arr.reduce((t, e) => t + Math.max(1, e.sets || 1), 0);
   const topW = (arr) => Math.max(...arr.map((e) => e.weight));
-  const best = (arr) => arr.reduce((b, e) => (!b || estE1RM(e.weight, e.reps) > estE1RM(b.weight, b.reps) ? e : b), null);
+  const best = (arr) => arr.reduce((b, e) => (!b || e1(e) > e1(b) ? e : b), null);
   const perWeek = (n) => Math.round((n / (DIGEST_WINDOW / 7)) * 10) / 10;
   const lifts = [], stalled = [];
   Object.entries(byEx).forEach(([name, list]) => {
@@ -963,7 +982,7 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
     if (sess(list) >= 3 && plateauFlag(list)) stalled.push(name);
     if (!cur.length || !prev.length) return;
     const bc = best(cur), bp = best(prev);
-    const ec = estE1RM(bc.weight, bc.reps), ep = estE1RM(bp.weight, bp.reps);
+    const ec = e1(bc), ep = e1(bp);
     const wc = topW(cur), wp = topW(prev);
     const drivers = [];
     if (wc !== wp) drivers.push(`top weight ${wc > wp ? "up" : "down"} from ${cw(wp)} to ${cw(wc)} ${unit}`);
@@ -996,10 +1015,10 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
     dayEntries.forEach((e) => {
       const p = (per[e.exercise] = per[e.exercise] || { sets: 0, top: null });
       p.sets += Math.max(1, e.sets || 1);
-      if (!p.top || estE1RM(e.weight, e.reps) > estE1RM(p.top.weight, p.top.reps)) p.top = e;
+      if (!p.top || e1(e) > e1(p.top)) p.top = e;
     });
     const topSets = Object.entries(per)
-      .map(([exercise, p]) => ({ exercise, topSet: `${cw(p.top.weight)} x ${p.top.reps}`, sets: p.sets, score: estE1RM(p.top.weight, p.top.reps) }))
+      .map(([exercise, p]) => ({ exercise, topSet: `${cw(p.top.weight)} x ${p.top.reps}`, sets: p.sets, score: e1(p.top) }))
       .sort((a, b) => b.score - a.score).slice(0, 6).map((t) => ({ exercise: t.exercise, topSet: t.topSet, sets: t.sets }));
     lastWorkout = { date: lastDate, daysAgo: daysBetween(lastDate, todayIso), day: dayName, topSets };
   }
@@ -1011,7 +1030,7 @@ function computeDigestStats({ strengthEntries, dayStats, todayIso, workouts, exe
     const cur = list.filter((e) => e.date >= curStart), old = list.filter((e) => e.date < curStart);
     if (!cur.length || !old.length) return;
     const bc = best(cur), bo = best(old);
-    const ec = estE1RM(bc.weight, bc.reps), eo = estE1RM(bo.weight, bo.reps);
+    const ec = e1(bc), eo = e1(bo);
     if (ec > eo) newPRs.push({ exercise: name, now: `${cw(bc.weight)} x ${bc.reps}`, before: `${cw(bo.weight)} x ${bo.reps}`, date: bc.date, gainPct: Math.round(((ec - eo) / eo) * 1000) / 10 });
   });
   newPRs.sort((a, b) => b.gainPct - a.gainPct);
@@ -1052,6 +1071,8 @@ function DotIcon({ rows, color, size = 26 }) {
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === "#") dots.push(<circle key={x + "-" + y} cx={x + 0.5} cy={y + 0.5} r="0.4" />); });
   return <svg width={size} height={size * h / w} viewBox={`0 0 ${w} ${h}`} fill={color} aria-hidden="true">{dots}</svg>;
 }
+const DOT_PLUS = ["..#..","..#..","#####","..#..","..#.."];
+const DOT_MINUS = ["#####"];
 const DOT_HOME = [".....#.....","....#.#....","...#...#...","..#.....#..",".#.......#.","..#.....#..","..#.###.#..","..#.#.#.#..","..#.#.#.#..","..#######.."];
 const DOT_LIFT = ["..##.....##..",".###.....###.","####.....####","#############","####.....####",".###.....###.","..##.....##.."];
 const DOT_CHART = ["........##.","........##.","........##.","........##.","....##..##.","....##..##.","....##..##.","##..##..##.","##..##..##.","##..##..##."];
@@ -1286,7 +1307,7 @@ function RadarChart({ data, rangeLabel, onTap }) {
   const minV = Math.min(0, ...vals), maxV = Math.max(...vals, 5);
   const barX = labelW + gap, barW = W - barX - valW - gap;
   const sx = (v) => barX + ((v - minV) / (maxV - minV || 1)) * barW;
-  const zeroX = sx(0);
+  const zeroX = Math.round(sx(0) / 4) * 4;
   const top = padT + (rowH - 22) / 2, bottom = H - padT - (rowH - 22) / 2;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "pointer" }} onClick={onTap} role="img" aria-label="Strength growth by category">
@@ -1296,14 +1317,15 @@ function RadarChart({ data, rangeLabel, onTap }) {
       </defs>
       {data.map((d, i) => {
         const y = padT + i * rowH, cy = y + rowH / 2, up = d.value >= 0;
-        const x1 = Math.min(zeroX, sx(d.value)), w = Math.max(Math.abs(sx(d.value) - zeroX), d.hasData ? 2 : 0);
+        const snap = (v) => Math.round(v / 4) * 4;
+        const x1 = snap(Math.min(zeroX, sx(d.value))), w = Math.max(snap(Math.abs(sx(d.value) - zeroX)), d.hasData ? 4 : 0), by = snap(cy - 12);
         const col = up ? "var(--gain)" : "var(--loss)";
         const endX = up ? x1 + w : x1;
         return (
-          <g key={d.label}>
+          <g key={d.label} onClick={(ev) => { ev.stopPropagation(); if (onTap) onTap(d.id); }}>
             <text x={labelW} y={cy} fontSize="13" fill="var(--text-primary)" textAnchor="end" dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 600 }}>{d.label}</text>
-            {d.hasData && <rect x={x1} y={cy - 11} width={w} height={22} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
-            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={cy - 11} width={2} height={22} fill={col} />}
+            {d.hasData && <rect x={x1} y={by} width={w} height={24} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
+            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={by} width={2} height={24} fill={col} />}
             <text x={up ? endX + 8 : x1 - 8} y={cy} fontSize="14" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor={up ? "start" : "end"} dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 700 }}>{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
           </g>
         );
@@ -1360,7 +1382,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
   const n = weeks.length;
   const bw = (W - padL - padR) / n - 6;
   return (
-    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200 }}>
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 200, cursor: "pointer" }} onClick={() => onTapBar && onTapBar()}>
       {[0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + (1 - t) * (H - padT - padB);
         return <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--border)" strokeWidth="1" opacity="0.5" /><text x={2} y={yy + 3} fontSize="8" fill="var(--text-primary)">{Math.round((max * t) / 1000)}k</text></g>;
@@ -1381,6 +1403,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
 }
 
 function ConsistencyHeatmap({ weeks, onTap, dots }) {
+  const tapRef = useRef(null);
   // weeks: [[{date, count, future}, ...7 days Monday to Sunday], ...]
   const cell = 20, gap = 4;
   const svgRef = useRef(null);
@@ -1392,7 +1415,13 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
   const colorFor = () => "var(--gain)";
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
-    <svg ref={svgRef} viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: "auto", display: "block", cursor: "pointer" }} onClick={(ev) => {
+      const el = svgRef.current; if (!el || !onTap) return;
+      const r = el.getBoundingClientRect();
+      const col = Math.floor((((ev.clientX - r.left) / r.width) * W) / (cell + gap)), row = Math.floor((((ev.clientY - r.top) / r.height) * (H + 4)) / (cell + gap));
+      const day = col >= 0 && col < weeks.length && row >= 0 && row < 7 ? weeks[col][row] : null;
+      onTap(day && !day.future ? day.date : null);
+    }}>
       {dots ? weeks.map((week, wi) => week.map((day, di) => {
         // Each day is a small square of the same tiny dots as the main graph: a trained day is filled, a rest day is faint.
         const pt = dotGap, N = Math.max(3, Math.round(cell / pt)), x0 = wi * (cell + gap) + (cell - (N - 1) * pt) / 2, y0 = di * (cell + gap) + (cell - (N - 1) * pt) / 2, out = [];
@@ -1585,6 +1614,7 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null);
   const [hexDraft, setHexDraft] = useState("");
   const [me, setMe] = useState(null);                       // { role: "owner" | "tester", name }
   const [feedbackText, setFeedbackText] = useState("");
@@ -1740,6 +1770,9 @@ export default function Home() {
       if (settings.dotNums !== false) root.setAttribute("data-dotnums", "on"); else root.removeAttribute("data-dotnums");
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute("content", t.themeColor);
+      // iOS home-screen apps read this at launch: dark text on a light bar when the app is light.
+      const sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (sb) sb.setAttribute("content", t.scheme === "light" ? "default" : "black-translucent");
     };
     apply();
     if (settings.mode === "system" && mq && mq.addEventListener) { mq.addEventListener("change", apply); return () => mq.removeEventListener("change", apply); }
@@ -2040,15 +2073,36 @@ export default function Home() {
     return map;
   }, [entries]);
 
+  // Exercises logged with no added weight or with assist (minus) weight: pull-ups, dips, push-ups.
+  const bwNames = useMemo(() => {
+    const set = new Set();
+    entries.forEach((e) => { if (!e.isWarmup && !(e.weight > 0)) set.add(e.exercise); });
+    return set;
+  }, [entries]);
+  const canGoNegative = (name) => !!name && (bwNames.has(name) || /pull|chin|dip|push|assist/i.test(name));
+
   // Warm-up sets are real reps, but they're not a signal of strength: every recommendation, chart,
   // and "best lift" calculation ignores them so a light warm-up never gets mistaken for a top set.
-  const strengthEntries = useMemo(() => entries.filter((e) => !e.isWarmup), [entries]);
+  // strengthEntries feeds the Home numbers, digest and carousel. Bodyweight lifts count as body weight plus
+  // added (or minus assist); with no body weight saved they are left out so a 0 never skews a total.
+  const strengthEntries = useMemo(() => entries.filter((e) => !e.isWarmup).flatMap((e) => {
+    if (!bwNames.has(e.exercise)) return [e];
+    const bwt = settings.bodyWeight || 0;
+    return bwt > 0 ? [{ ...e, bw: true, added: e.weight || 0, weight: Math.max(5, (e.weight || 0) + bwt) }] : [];
+  }), [entries, bwNames, settings.bodyWeight]);
   const entriesByExerciseStrength = useMemo(() => {
     const map = {};
     for (const e of strengthEntries) (map[e.exercise] = map[e.exercise] || []).push(e);
     Object.values(map).forEach((l) => l.sort((a, b) => (a.date < b.date ? 1 : -1)));
     return map;
   }, [strengthEntries]);
+  // Raw working sets (weight as logged: 0 for bodyweight, negative for assist). Recommendations read these.
+  const entriesByExerciseRaw = useMemo(() => {
+    const map = {};
+    for (const e of entries) if (!e.isWarmup) (map[e.exercise] = map[e.exercise] || []).push(e);
+    Object.values(map).forEach((l) => l.sort((a, b) => (a.date < b.date ? 1 : -1)));
+    return map;
+  }, [entries]);
 
   const todaysEntries = entries.filter((e) => e.date === selectedDate);
 
@@ -2058,7 +2112,7 @@ export default function Home() {
   const buildRecommendation = (name, setCount, mWeight, mReps, sideArg) => {
     if (!name) return null;
     const sideNow = sideArg || logSide;
-    const fullHist = oneSidedNow(name) && entriesByExerciseStrength[name] ? entriesByExerciseStrength[name].filter((e) => !e.side || e.side === sideNow) : entriesByExerciseStrength[name];
+    const fullHist = oneSidedNow(name) && entriesByExerciseRaw[name] ? entriesByExerciseRaw[name].filter((e) => !e.side || e.side === sideNow) : entriesByExerciseRaw[name];
     const priorHist = fullHist ? fullHist.filter((e) => e.date < todayISO()) : fullHist;
     const hist = priorHist && priorHist.length ? priorHist : fullHist;
     const hasManual = mWeight && mReps;
@@ -2073,8 +2127,8 @@ export default function Home() {
     } else if (hist && hist.length) {
       // Only heavy low-rep attempts on record: back-calculate a weight for an 8-rep set from the
       // best estimated max instead of prescribing the max itself.
-      const bestEntry = hist.reduce((best, e) => (estE1RM(e.weight, e.reps) > estE1RM(best.weight, best.reps) ? e : best), hist[0]);
-      const e1rm = estE1RM(bestEntry.weight, bestEntry.reps);
+      const bestEntry = hist.reduce((best, e) => (e1(e) > e1(best) ? e : best), hist[0]);
+      const e1rm = e1(bestEntry);
       nextTopWeight = roundTo5(e1rm / (1 + REC_LOW / 30));
       lastTop = bestEntry;
       lastSessionDate = bestEntry.date;
@@ -2091,7 +2145,7 @@ export default function Home() {
     const pcts = basedOnActualSets && setWeights && setWeights[0] ? setWeights.map((w) => w / setWeights[0]) : [1, 0.9, 0.85, 0.8, 0.75, 0.7];
     const rows = Array.from({ length: setCount }, (_, i) => {
       const pct = pcts[i] !== undefined ? pcts[i] : pcts[pcts.length - 1];
-      return { set: i + 1, weight: Math.round((nextTopWeight * pct) / 5) * 5 };
+      return { set: i + 1, weight: nextTopWeight <= 0 ? nextTopWeight : Math.round((nextTopWeight * pct) / 5) * 5 };
     });
     return { noData: false, lastTop, lastSessionDate, nextTopWeight, note, rows, repLow, repHigh, basedOnActualSets, fromManual, defaultSets };
   };
@@ -2112,7 +2166,7 @@ export default function Home() {
   const recSetCount = 4;
   const recommendation = useMemo(
     () => buildRecommendation(recExercise, recSetCount, manualWeight ? String(toLbs(manualWeight)) : "", manualReps),
-    [recExercise, recSetCount, entriesByExerciseStrength, manualWeight, manualReps, progressionMode, unit, logSide, exMeta]
+    [recExercise, recSetCount, entriesByExerciseRaw, manualWeight, manualReps, progressionMode, unit, logSide, exMeta]
   );
 
   // Picking an exercise (from the list, the search box or the swap button) stashes whatever is in
@@ -2207,7 +2261,8 @@ export default function Home() {
 
   const bumpForm = (key, delta) => setForm((f) => {
     const cur = parseFloat(f[key]);
-    const next = Math.max(0, Math.round(((isNaN(cur) ? 0 : cur) + delta) * 100) / 100);
+    const floor = key === "weight" && canGoNegative(f.exercise.trim()) ? -999 : 0;
+    const next = Math.max(floor, Math.round(((isNaN(cur) ? 0 : cur) + delta) * 100) / 100);
     return { ...f, [key]: String(next) };
   });
 
@@ -2234,7 +2289,7 @@ export default function Home() {
   const [editingId, setEditingId] = useState(null);
   const [showTodaysLog, setShowTodaysLog] = useState(false);
   const [editForm, setEditForm] = useState({ weight: "", reps: "", sets: "" });
-  const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(W(entry.weight)), reps: String(entry.reps), sets: String(entry.sets) }); };
+  const startEdit = (entry) => { setEditingId(entry.id); setEditForm({ weight: String(W(entry.bw ? entry.added : entry.weight)), reps: String(entry.reps), sets: String(entry.sets) }); };
   const cancelEdit = () => setEditingId(null);
   const saveEdit = (id) => {
     if (!editForm.weight) return;
@@ -2281,7 +2336,7 @@ export default function Home() {
   const closeEdit = () => { if (editDirty() && !window.confirm("Discard your changes to this exercise?")) return; setEditEx(null); };
   const closeNotes = () => { if (notesBusy) return; if (notesRows.some((r) => r.keep) && !window.confirm("Discard these lines without saving?")) return; setNotesOpen(false); setNotesRows([]); };
   const closeTopSheetRef = useRef(null);
-  closeTopSheetRef.current = () => { if (editEx) closeEdit(); else if (notesOpen) closeNotes(); else if (settingsOpen) setSettingsOpen(false); };
+  closeTopSheetRef.current = () => { if (editEx) closeEdit(); else if (notesOpen) closeNotes(); else if (legalDoc) setLegalDoc(null); else if (settingsOpen) setSettingsOpen(false); };
   useEffect(() => { const h = (e) => { if (e.key === "Escape" && closeTopSheetRef.current) closeTopSheetRef.current(); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
   const openEditEx = (name) => {
     const days = workouts.filter((w) => (exercises[w.id] || []).some((n) => n.toLowerCase() === name.toLowerCase())).map((w) => w.id);
@@ -2420,23 +2475,11 @@ export default function Home() {
   const maKey = compareOpen ? maKeyRaw : "off";
   const [scrubPoint, setScrubPoint] = useState(null);
 
-  const radarData = useMemo(() => {
-    return workouts.map((w) => {
-      const exList = exercises[w.id] || [];
-      const perExercise = exList.map((ex) => {
-        const hist = entriesByExerciseStrength[ex] || [];
-        const byDate = {};
-        hist.forEach((e) => { byDate[e.date] = pickBest(byDate[e.date], e); });
-        const dates = Object.keys(byDate).sort();
-        if (dates.length < 2) return null;
-        const first = estE1RM(byDate[dates[0]].weight, byDate[dates[0]].reps);
-        const last = estE1RM(byDate[dates[dates.length - 1]].weight, byDate[dates[dates.length - 1]].reps);
-        return first ? ((last - first) / first) * 100 : 0;
-      }).filter((v) => v !== null);
-      const avg = perExercise.length ? Math.round(perExercise.reduce((a, b) => a + b, 0) / perExercise.length) : 0;
-      return { label: w.name, value: avg, hasData: perExercise.length > 0 };
-    });
-  }, [workouts, exercises, entriesByExerciseStrength]);
+  // Same numbers the Strength page shows for "All time", so the chart and its breakdown always agree.
+  const radarData = useMemo(
+    () => growthByCategory({ workouts, exercises, entries: strengthEntries, start: "0000-01-01", end: "9999-12-31" }).map((c) => ({ id: c.id, label: c.label, value: c.value, hasData: c.hasData })),
+    [workouts, exercises, strengthEntries]
+  );
 
   // Calendar weeks, Monday to Sunday, warm-ups excluded. The current week is "so far".
   const weeklyVolume = useMemo(() => {
@@ -2488,6 +2531,7 @@ export default function Home() {
   }, [entries]);
 
   const [radarInfoOpen, setRadarInfoOpen] = useState(false);
+  const [overview, setOverview] = useState(null); // Training overview drill-down page: { kind, range, cat?, date? }
   const [volumeTapInfo, setVolumeTapInfo] = useState(null);
   const [heatmapInfoOpen, setHeatmapInfoOpen] = useState(false);
 
@@ -2504,7 +2548,7 @@ export default function Home() {
   // ---- Tutorial (runs on sample data that is never saved) ----
   const [tutIdx, setTutIdx] = useState(null);
   const tutSnap = useRef(null);
-  const closeAllViews = () => { setCompareOpen(false); setCarouselOpen(false); setXpage(null); setFeedOpen(false); setSettingsOpen(false); setAddingExercise(false); };
+  const closeAllViews = () => { setOverview(null); setCompareOpen(false); setCarouselOpen(false); setXpage(null); setFeedOpen(false); setSettingsOpen(false); setAddingExercise(false); };
   const startTutorial = () => {
     if (demoRef.current) return;
     tutSnap.current = { workouts, exercises, entries, restDays, tickers, exMeta, progressionMode, chartFocusExercise, selectedDate };
@@ -2738,8 +2782,8 @@ export default function Home() {
       const byDate = {};
       hist.forEach((e) => { byDate[e.date] = pickBest(byDate[e.date], e); });
       const dates = Object.keys(byDate).sort();
-      const points = dates.map((d) => estE1RM(byDate[d].weight, byDate[d].reps));
-      const best = hist.length ? Math.max(...hist.map((e) => estE1RM(e.weight, e.reps))) : 0;
+      const points = dates.map((d) => e1(byDate[d]));
+      const best = hist.length ? Math.max(...hist.map((e) => e1(e))) : 0;
       return { exercise: ex, points, best };
     }).filter((s) => s.points.length >= 3);
 
@@ -2790,7 +2834,7 @@ export default function Home() {
     exNames.forEach((ex) => {
       const dates = Object.keys(perExercise[ex]).sort();
       price[ex] = {};
-      dates.forEach((d) => { price[ex][d] = estE1RM(perExercise[ex][d].weight, perExercise[ex][d].reps); });
+      dates.forEach((d) => { price[ex][d] = e1(perExercise[ex][d]); });
       firstDate[ex] = dates[0];
     });
 
@@ -2884,7 +2928,7 @@ export default function Home() {
     inRange.forEach((e) => { byDate[e.date] = pickBest(byDate[e.date], e, metric); });
     const rows = Object.keys(byDate).sort().map((date) => {
       const entry = byDate[date];
-      return { date, label: fmtDate(date), [chartFocusExercise]: bw.repsMode ? entry.reps : W(setScore(entry, metric)), [`${chartFocusExercise}__r`]: entry.reps, [`${chartFocusExercise}__s`]: entry.sets };
+      return { date, label: fmtDate(date), [chartFocusExercise]: bw.repsMode ? entry.reps : (bw.hasBw && metric === "weight" ? W(entry.added) : W(setScore(entry, metric))), [`${chartFocusExercise}__r`]: entry.reps, [`${chartFocusExercise}__s`]: entry.sets };
     });
     return { rows, series: [chartFocusExercise] };
   }, [entriesByExerciseStrength, entriesByExercise, chartRange, chartMetric, chartFocusExercise, unit, settings.bodyWeight]);
@@ -2929,7 +2973,7 @@ export default function Home() {
     const esc = (v) => (typeof v === "string" && v.includes(",")) ? `"${v}"` : v;
     const header = "Date,Workout,Exercise,Weight,Sets,Reps,Est1RM";
     const rows = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) =>
-      [e.date, esc(workoutName(e.workoutId)), esc(e.exercise), e.weight, e.sets, e.reps, estE1RM(e.weight, e.reps)].join(",")
+      [e.date, esc(workoutName(e.workoutId)), esc(e.exercise), e.weight, e.sets, e.reps, e1(e)].join(",")
     );
     triggerDownload([header, ...rows].join("\n"), `hooks-workout-sets-${todayISO()}.csv`, "text/csv");
   };
@@ -3073,7 +3117,7 @@ export default function Home() {
       <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
         <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
           <button type="button" className="hist-date" onClick={() => openExercise(e.exercise, e.date, false)} aria-label={`Open ${e.exercise} through ${fmtDate(e.date)}`}>{fmtDate(e.date)}</button>
-          <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+          <span className="hist-nums">{setWt(e, W, unit, bwNames.has(e.exercise))} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
         </div>
       </SwipeRow>
     ) : (
@@ -3082,7 +3126,7 @@ export default function Home() {
           ? <span className="muted" style={{ fontSize: "var(--fs-label)" }}>{fmtDate(e.date)}</span>
           : <span style={{ fontWeight: 600 }}>{e.exercise}{e.side && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> ({e.side === "L" ? "left" : "right"})</span>}{e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)", fontWeight: 400 }}> (warm-up)</span>}</span>}
         <span className="num">
-          {W(e.weight)}<span className="muted">{unit}</span>{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
+          {bwNames.has(e.exercise) ? setWt(e, W, unit, true) : <>{W(e.weight)}<span className="muted">{unit}</span></>}{e.reps > 0 && <span className="muted">× {e.reps}{e.sets > 1 ? ` × ${e.sets}` : ""}</span>}
           {compact && e.isWarmup && <span className="muted" style={{ fontSize: "var(--fs-label)" }}>(warm-up)</span>}
           <button className="del-btn" onClick={() => startEdit(e)} title="Edit" aria-label="Edit set">✎</button>
           <button className="del-btn" onClick={() => toggleWarmup(e.id)} title={e.isWarmup ? "Mark as working set" : "Mark as warm-up"} style={{ fontSize: "var(--fs-label)", fontWeight: 600, color: e.isWarmup ? "var(--text-primary)" : "var(--text-secondary)" }}>W</button>
@@ -3261,7 +3305,7 @@ export default function Home() {
                 <div className="st-grid st-mini">
                   <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{W(st.e5rm)}</div></div>
                   <div className="st-cell"><div className="st-label">Est. max</div><div className="st-val">{W(st.e1rm)}</div></div>
-                  <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{W(st.lastSet.weight)} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
+                  <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{st.lastSet.bw ? setWt(st.lastSet, W, unit).replace(` ${unit}`, "") : W(st.lastSet.weight)} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
                 </div>
               );
             })()}
@@ -3291,17 +3335,17 @@ export default function Home() {
                 <div className="rec-top tap" role="button" tabIndex={0} aria-label={`Open ${recExercise} progress`} onClick={() => openExercise(recExercise, todayISO(), true)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openExercise(recExercise, todayISO(), true); }}>
                   <div>
                     <div className="label-sm" style={{ marginBottom: 0 }}>Recommended today ›</div>
-                    <div className="rec-main">{Wrec(recommendation.nextTopWeight)}<span className="muted"> {unit} × </span>{repsText(recommendation.repLow, recommendation.repHigh)}</div>
+                    <div className="rec-main">{bwNames.has(recExercise) ? <>{bwLabel(Wrec(recommendation.nextTopWeight), (v) => v, unit)}<span className="muted"> × </span></> : <>{Wrec(recommendation.nextTopWeight)}<span className="muted"> {unit} × </span></>}{repsText(recommendation.repLow, recommendation.repHigh)}</div>
                     {barbellNow(recExercise) && (() => { const pl = platesPerSide(recommendation.nextTopWeight); if (!pl) return null; return <div className="plate-line">{pl.just ? "Just the bar (45 lb)" : <>Per side: <b>{pl.list.join(" + ")}</b> lb</>}{!pl.exact && <span className="muted"> (closest: {pl.total} lb)</span>}</div>; })()}
                   </div>
-                  <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{W(recommendation.lastTop.weight)} × {recommendation.lastTop.reps}</div>
+                  <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{bwNames.has(recExercise) ? bwLabel(W(recommendation.lastTop.weight), (v) => v, "").trim() : W(recommendation.lastTop.weight)} × {recommendation.lastTop.reps}</div>
                 </div>
                 <div className="rec-note">{cvText(recommendation.note)}</div>
                 <div className="today-list" style={{ marginTop: 8 }}>
                   {recommendation.rows.map((r) => (
                     <div key={r.set} className={"today-item" + (r.set === 1 ? " top-set" : " sub-set")} style={{ padding: "8px 12px" }}>
                       <span style={{ fontWeight: 600 }}>{r.set === 1 ? "Top set" : `Set ${r.set}`}</span>
-                      <span className="num">{Wrec(r.weight)}<span className="muted">{unit}</span><span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
+                      <span className="num">{bwNames.has(recExercise) ? bwLabel(Wrec(r.weight), (v) => v, unit) : <>{Wrec(r.weight)}<span className="muted">{unit}</span></>}<span className="muted">× {repsText(recommendation.repLow, recommendation.repHigh)}</span></span>
                     </div>
                   ))}
                 </div>
@@ -3342,13 +3386,13 @@ export default function Home() {
             )}
 
             <div className="stepper-list" style={{ marginTop: 12 }}>
-              {[["weight", `Weight (${unit})`, "0", "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "0", "numeric", 1]].map(([key, label, ph, mode, step]) => (
+              {[["weight", canGoNegative(form.exercise.trim()) ? `Weight (${unit}), minus = assist` : `Weight (${unit})`, "0", "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "0", "numeric", 1]].map(([key, label, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
                   <div className="label-sm stepper-label">{label}</div>
                   <div className="stepper-row">
-                    <button type="button" className="step-btn" aria-label={`Decrease ${label}`} onClick={() => bumpForm(key, -step)}>−</button>
+                    <button type="button" className="step-btn" aria-label={`Decrease ${label}`} onClick={() => bumpForm(key, -step)}><DotIcon rows={DOT_MINUS} color="currentColor" size={18} /></button>
                     <input type="number" inputMode={mode} placeholder={ph} aria-label={label} value={form[key]} onFocus={(e) => { const t = e.target; setTimeout(() => t.select(), 0); }} onMouseUp={(e) => e.preventDefault()} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-                    <button type="button" className="step-btn" aria-label={`Increase ${label}`} onClick={() => bumpForm(key, step)}>+</button>
+                    <button type="button" className="step-btn" aria-label={`Increase ${label}`} onClick={() => bumpForm(key, step)}><DotIcon rows={DOT_PLUS} color="currentColor" size={18} /></button>
                   </div>
                 </div>
               ))}
@@ -3518,29 +3562,22 @@ export default function Home() {
           <div className="label-sm" style={{ margin: "24px 0 12px" }}>Training overview</div>
           <div className="card">
             <CardHead title="Strength growth by category" />
-            <RadarChart data={radarData} onTap={() => setRadarInfoOpen((v) => !v)} />
-            {radarInfoOpen && allTimeRange && (
-              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-                {fmtDate(allTimeRange.start)} – {fmtDate(allTimeRange.end)}
-              </div>
-            )}
-            <InfoFoot title="Strength growth by category" info="Average % change in estimated 1RM per workout, all-time. Tap the chart for the exact span. Hollow points mean not enough data yet." />
+            <RadarChart data={radarData} onTap={(id) => setOverview({ kind: "growth", range: "all", cat: id || null })} />
+            <button type="button" className="detail-link" onClick={() => setOverview({ kind: "growth", range: "all" })}>{allTimeRange ? `All time · ${fmtDate(allTimeRange.start)} – ${fmtDate(todayISO())}` : "All time"} · Details ›</button>
+            <InfoFoot title="Strength growth by category" info="Average % change in estimated 1RM per workout, all time. Tap the chart for a breakdown by exercise." />
           </div>
           <div className="card">
             <CardHead title="Weekly training volume" />
-            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => {}} dots={settings.dotNums !== false} />
+            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => setOverview({ kind: "volume", range: "3m" })} dots={settings.dotNums !== false} />
+            <button type="button" className="detail-link" onClick={() => setOverview({ kind: "volume", range: "3m" })}>Last 10 weeks · Details ›</button>
             {(() => { const cur = weeklyVolume.find((w) => w.isCurrent); if (!cur || !(cur.volume > 0)) return null; const t = compareLine(cur.volume, "week" + cur.volume); return t ? <div className="compare-line">This week: {fmtNum(W(cur.volume))} {unit} moved. {t}</div> : null; })()}
-            <InfoFoot title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. This week is highlighted." />
+            <InfoFoot title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. Tap the chart to split it by category and exercise." />
           </div>
           <div className="card">
             <CardHead title="Training consistency" />
-            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={() => setHeatmapInfoOpen((v) => !v)} dots={settings.dotNums !== false} />
-            {heatmapInfoOpen && heatmapWeeks.length > 0 && (
-              <div style={{ textAlign: "center", fontSize: "var(--fs-label)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-                {fmtDate(heatmapWeeks[0][0].date)} – {fmtDate(todayISO())}
-              </div>
-            )}
-            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). A lit square means you trained that day. Tap the chart for the span." />
+            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={(d) => setOverview({ kind: "days", range: "3m", date: d || null })} dots={settings.dotNums !== false} />
+            <button type="button" className="detail-link" onClick={() => setOverview({ kind: "days", range: "3m" })}>Last 10 weeks · Details ›</button>
+            <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). A lit square means you trained that day. Tap a day to see what you did." />
             <div className="cons-stats">
               <div className="st-cell"><div className="st-label">Week streak</div><div className="st-value">{consistency.streak}</div></div>
               <div className="st-cell"><div className="st-label">Days this month</div><div className="st-value">{consistency.month}</div></div>
@@ -3571,6 +3608,12 @@ export default function Home() {
         </div>
       )}
 
+      {overview && (
+        <Breakdown
+          initial={overview} onClose={() => setOverview(null)} strengthEntries={strengthEntries} workouts={workouts} exercises={exercises} unit={unit} W={W}
+          h={{ fmtDate, fmtDateFull, fmtNum, shiftDate, weekStartISO, todayISO, rangeCutoffISO, RANGE_PRESETS, setWt }}
+        />
+      )}
       {xpage && xData && (
         <div className="xpage" role="dialog" aria-label={xpage.exercise}>
           <div className="xp-top">
@@ -3625,8 +3668,8 @@ export default function Home() {
                     {xData.bw && xData.bw.repsMode ? cell("Total reps", fmtNum(xStats.reps)) : cell(`Volume (${unit})`, fmtNum(W(xStats.volume)))}
                     {cell("Sessions", xStats.sessions)}
                     {cell("Sets / Reps", `${xStats.sets} / ${fmtNum(xStats.reps)}`)}
-                    {cell(xData.bw && xData.bw.repsMode ? "Most reps" : "PR", xData.bw && xData.bw.repsMode ? xStats.prWeight : `${W(xStats.prWeight)}`)}
-                    {xData.bw && xData.bw.repsMode ? null : cell("Avg wt / rep", xStats.avgPerRep ? W(xStats.avgPerRep) : "n/a")}
+                    {cell(xData.bw && xData.bw.repsMode ? "Most reps" : "PR", xData.bw && xData.bw.repsMode ? xStats.prWeight : xData.bw && xData.bw.hasBw ? setWt(xStats.prEntry, W, unit).replace(` ${unit}`, "") : `${W(xStats.prWeight)}`)}
+                    {xData.bw && (xData.bw.repsMode || xData.bw.hasBw) ? null : cell("Avg wt / rep", xStats.avgPerRep ? W(xStats.avgPerRep) : "n/a")}
                     {cell("Last session", ago(xStats.lastDate))}
                   </div>
                 </div>
@@ -3640,7 +3683,7 @@ export default function Home() {
                   <SwipeRow key={e.id} onEdit={() => startEdit(e)} onDelete={() => deleteEntry(e.id)}>
                     <div className="hist-item hist-simple" style={{ opacity: e.isWarmup ? 0.6 : 1 }}>
                       <button type="button" className={"hist-date" + (e.date === xpage.date ? " on" : "")} onClick={() => { setXpage({ ...xpage, date: e.date, ytd: false, range: "all" }); setXScrub(null); }}>{fmtDate(e.date)}</button>
-                      <span className="hist-nums">{W(e.weight)} {unit} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
+                      <span className="hist-nums">{setWt(e, W, unit, bwNames.has(e.exercise))} · {e.reps > 0 ? e.reps : 0} reps · {e.sets || 1} {(e.sets || 1) === 1 ? "set" : "sets"}{e.side && <span className="muted"> · {e.side === "L" ? "left" : "right"}</span>}{e.brand && <span className="muted"> · {e.brand}</span>}{e.isWarmup && <span className="muted"> · warm-up</span>}</span>
                     </div>
                   </SwipeRow>
                 )))}
@@ -3739,6 +3782,19 @@ export default function Home() {
       )}
       {notesToast && <div className="undo-toast">{notesToast}</div>}
 
+      {legalDoc && (
+        <>
+          <div className="sheet-backdrop" style={{ zIndex: 1300 }} onClick={() => setLegalDoc(null)} />
+          <div className="sheet sheet-settings" style={{ zIndex: 1301 }} role="dialog" aria-label={LEGAL_DOCS[legalDoc].title}>
+            <div className="sheet-grip" />
+            <div className="sheet-head">
+              <span className="sheet-title">{LEGAL_DOCS[legalDoc].title}</span>
+              <button className="close-btn" onClick={() => setLegalDoc(null)} aria-label="Close">✕</button>
+            </div>
+            <LegalBody doc={LEGAL_DOCS[legalDoc]} />
+          </div>
+        </>
+      )}
       {settingsOpen && (
         <>
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)} />
@@ -3775,6 +3831,11 @@ export default function Home() {
             <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
             {canVibrate && <label className="toggle-row"><span>Vibration</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>}
 
+            <div className="label-sm" style={{ marginTop: 16 }}>Legal</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+              <button type="button" className="pill" onClick={() => setLegalDoc("privacy")}>Privacy Policy</button>
+              <button type="button" className="pill" onClick={() => setLegalDoc("terms")}>Terms of Use</button>
+            </div>
             <div className="label-sm" style={{ marginTop: 16 }}>Tell us what you think</div>
             <textarea className="feedback-box" rows={3} value={feedbackText} onChange={(e) => { setFeedbackText(e.target.value); setFeedbackStatus(""); }} placeholder="What's confusing, missing or great?" />
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
