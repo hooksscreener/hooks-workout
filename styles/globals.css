@@ -739,3 +739,14 @@ html.scrub-lock,html.scrub-lock body{overflow:hidden !important;overscroll-behav
 .bd-legend{display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-4);align-items:center;margin-top:var(--s-3);}
 .bd-key{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;color:var(--text-primary);}
 .detail-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;background:none;border:0;color:var(--text-secondary);font-size:.75rem;cursor:pointer;gap:6px;}
+
+/* Build 57: breakdown motion */
+@keyframes bdGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes bdGrowY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes bdFade{from{opacity:0}to{opacity:1}}
+.bd-grow{animation:bdGrowX .5s cubic-bezier(.2,.7,.2,1) both;}
+.bd-growy{animation:bdGrowY .5s cubic-bezier(.2,.7,.2,1) both;}
+.bd-fade{animation:bdFade .35s ease both;}
+.bd-heat{-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.bd-heat::-webkit-scrollbar{display:none;}
+@media (prefers-reduced-motion:reduce){.bd-grow,.bd-growy,.bd-fade{animation:none;}}

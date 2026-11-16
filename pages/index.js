@@ -34,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 56 · Nov 16";
+const BUILD_TAG = "Build 57 · Nov 16";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -2986,7 +2986,7 @@ export default function Home() {
   const [fillSlip, setFillSlip] = useState(null);   // trade-confirmation style receipt after logging a set
   const fillTimer = useRef(null);
   const undoTimer = useRef(null);
-  const openExercise = (exercise, date, ytd) => { setXpage({ exercise, date, ytd: !!ytd, range: ytd ? "ytd" : "all" }); setXEdit(false); setXScrub(null); setEditingId(null); };
+  const openExercise = (exercise, date, ytd, range) => { setXpage({ exercise, date, ytd: !!ytd, range: range || (ytd ? "ytd" : "all") }); setXEdit(false); setXScrub(null); setEditingId(null); };
   const closeExercise = () => { setXpage(null); setXEdit(false); setXScrub(null); setEditingId(null); };
   useEffect(() => {
     if (!xpage) return undefined;
@@ -3610,7 +3610,7 @@ export default function Home() {
 
       {overview && (
         <Breakdown
-          initial={overview} onClose={() => setOverview(null)} strengthEntries={strengthEntries} workouts={workouts} exercises={exercises} unit={unit} W={W}
+          initial={overview} onClose={() => setOverview(null)} onOpenExercise={(name, r) => openExercise(name, todayISO(), r === "ytd", r)} strengthEntries={strengthEntries} workouts={workouts} exercises={exercises} unit={unit} W={W}
           h={{ fmtDate, fmtDateFull, fmtNum, shiftDate, weekStartISO, todayISO, rangeCutoffISO, RANGE_PRESETS, setWt }}
         />
       )}
