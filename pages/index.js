@@ -5,7 +5,7 @@ import { mockSocial } from "../lib/mockSocial";
 import { compareWeight } from "../lib/compare";
 import { unlockAudio, playClick, playWoodTriple, playBell, vibrate, VIBE } from "../lib/fx";
 
-const LINE_COLORS = ["#ff6600", "#00d4ff", "#ffb000", "#ff3b3b", "#7CFC00", "#c792ea", "#ff6ec7", "#5ee6d0", "#a0d911", "#9a8c98"];
+const LINE_COLORS = ["#00d4ff", "#c792ea", "#ffd60a", "#ff6ec7", "#5ee6d0", "#9a8c98", "#8ab4ff", "#e0c3fc", "#b8b8ff", "#a0a0a0"];
 
 const DEFAULT_WORKOUTS = [
   { id: "push", name: "Push" },
@@ -30,7 +30,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 47 · Nov 15";
+const BUILD_TAG = "Build 48 · Nov 15";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -561,7 +561,7 @@ function FeedPage({ source = mockSocial }) {
                 </div>
                 <div className="fp-text">{it.text}</div>
               </div>
-              <div className="fp-emblem" aria-hidden="true"><DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--accent)" pitch={3} /></div>
+              <div className="fp-emblem" aria-hidden="true"><DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--gain)" pitch={3} /></div>
             </div>
             <button type="button" className={"fp-like" + (liked[it.id] ? " on" : "")} aria-pressed={!!liked[it.id]} onClick={() => setLiked((l) => ({ ...l, [it.id]: !l[it.id] }))}>
               <DotHeart on={!!liked[it.id]} size={3} />
@@ -601,6 +601,10 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
   const handlers = useHoldScrub(getIndex, setActiveIdx, svgRef);
 
   if (!hasData) return <div className="empty">No data</div>;
+  // One line = green if it ended above where it started, red if below. Several lines keep their own colors.
+  const _vals0 = rows.filter((r) => r[series[0]] !== undefined).map((r) => r[series[0]]);
+  const trendColor = _vals0.length > 1 && _vals0[_vals0.length - 1] < _vals0[0] ? "var(--loss)" : "var(--gain)";
+  const colorOf = (si) => (series.length === 1 ? trendColor : LINE_COLORS[si % LINE_COLORS.length]);
 
   const activeRow = activeIdx !== null && rows[activeIdx] ? rows[activeIdx] : null;
   const activeLines = activeRow
@@ -610,7 +614,7 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
         const suffix = mode === "exercise"
           ? `${activeRow[s]}${metric === "e1rm" ? " est. max" : ` ${unit}`}${activeRow[`${s}__r`] ? ` · ${activeRow[`${s}__r`]} reps${activeRow[`${s}__s`] > 1 ? ` × ${activeRow[`${s}__s`]}` : ""}` : ""}`
           : `${activeRow[s]}${metric === "e1rm" ? " est. max" : ` ${unit}`}`;
-        return { series: s, color: LINE_COLORS[colorIdx % LINE_COLORS.length], text: `${s}: ${suffix}`, detail };
+        return { series: s, color: colorOf(colorIdx), text: `${s}: ${suffix}`, detail };
       })
     : [];
 
@@ -634,6 +638,10 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
       onContextMenu={(e) => e.preventDefault()}
       {...handlers}
     >
+      <defs>
+        <pattern id="dotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="var(--gain)" fillOpacity="0.55" /></pattern>
+        <pattern id="dotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="var(--loss)" fillOpacity="0.55" /></pattern>
+      </defs>
       <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
         const yy = padT + t * (H - padT - padB);
@@ -643,9 +651,12 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
       {series.map((s, si) => {
         const pts = [];
         rows.forEach((r, i) => { if (r[s] !== undefined) pts.push(`${x(i)},${y(r[s])}`); });
-        return <polyline key={s} points={pts.join(" ")} fill="none" stroke={LINE_COLORS[si % LINE_COLORS.length]} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />;
+        return <g key={s}>
+          {series.length === 1 && pts.length > 1 && <polygon points={`${pts[0].split(",")[0]},${H - padB} ${pts.join(" ")} ${pts[pts.length - 1].split(",")[0]},${H - padB}`} fill={series.length === 1 && trendColor === "var(--loss)" ? "url(#dotsLoss)" : "url(#dotsGain)"} />}
+          <polyline points={pts.join(" ")} fill="none" stroke={colorOf(si)} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        </g>;
       })}
-      {n <= 24 && series.map((s, si) => rows.map((r, i) => r[s] !== undefined && <circle key={`${s}-${i}`} cx={x(i)} cy={y(r[s])} r="2.4" fill={LINE_COLORS[si % LINE_COLORS.length]} />))}
+      {n <= 24 && series.map((s, si) => rows.map((r, i) => r[s] !== undefined && <circle key={`${s}-${i}`} cx={x(i)} cy={y(r[s])} r="2.4" fill={colorOf(si)} />))}
       {ticks.map((tk, i) => <text key={i} x={padL + tk.pos * (W - padL - padR)} y={H - 6} fontSize="11" fill="var(--text-secondary)" textAnchor={tk.anchor}>{fmtDate(tk.date)}</text>)}
 
       {activeRow && (
@@ -1268,44 +1279,33 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
 }
 
 function RadarChart({ data, rangeLabel, onTap }) {
-  // data: [{ label, value, hasData }] — value is % growth, can be negative
-  const W = 320, H = 260, cx = 160, cy = 130, outerR = 90;
-  const n = data.length;
+  // Despite the old name this is now a set of horizontal bars: one per muscle group, green up, red down, from a zero line.
+  const W = 320, rowH = 46, padT = 6, labelW = 52, valW = 52, barX = labelW, barW = W - labelW - valW;
+  const H = data.length * rowH + padT * 2;
   const vals = data.map((d) => d.value);
-  const minVal = Math.min(0, ...vals);
-  const maxVal = Math.max(...vals, 5);
-  const radius = (v) => ((v - minVal) / (maxVal - minVal || 1)) * outerR;
-  const angle = (i) => (i * 2 * Math.PI) / n - Math.PI / 2;
-  const pt = (i, r) => [cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))];
-
-  const ringLevels = [0.25, 0.5, 0.75, 1];
-  const dataPts = data.map((d, i) => pt(i, radius(d.value)));
-  const dataPath = dataPts.map((p) => p.join(",")).join(" ");
-  const zeroR = radius(0);
-
+  const minV = Math.min(0, ...vals), maxV = Math.max(...vals, 5);
+  const sx = (v) => barX + ((v - minV) / (maxV - minV || 1)) * barW;
+  const zeroX = sx(0);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 260, cursor: "pointer" }} onClick={onTap}>
-      {ringLevels.map((lvl, ri) => {
-        const ringPts = data.map((_, i) => pt(i, outerR * lvl).join(",")).join(" ");
-        return <polygon key={ri} points={ringPts} fill="none" stroke="var(--border)" strokeWidth="1" />;
-      })}
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "pointer" }} onClick={onTap} role="img" aria-label="Strength growth by category">
+      <defs>
+        <pattern id="barDotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="var(--gain)" /></pattern>
+        <pattern id="barDotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="var(--loss)" /></pattern>
+      </defs>
       {data.map((d, i) => {
-        const [x, y] = pt(i, outerR);
-        return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--border)" strokeWidth="1" />;
+        const y = padT + i * rowH, cy = y + rowH / 2, up = d.value >= 0;
+        const x1 = Math.min(zeroX, sx(d.value)), w = Math.max(Math.abs(sx(d.value) - zeroX), d.hasData ? 2 : 0);
+        const col = up ? "var(--gain)" : "var(--loss)";
+        return (
+          <g key={d.label}>
+            <text x={0} y={cy} fontSize="12" fontWeight="600" fill="var(--text-primary)" dominantBaseline="central" fontFamily="'IBM Plex Sans',-apple-system,sans-serif">{d.label}</text>
+            {d.hasData && <rect x={x1} y={cy - 10} width={w} height={20} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
+            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={cy - 10} width={2} height={20} fill={col} />}
+            <text x={W} y={cy} fontSize="13" fontWeight="600" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor="end" dominantBaseline="central">{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
+          </g>
+        );
       })}
-      {zeroR > 0 && zeroR < outerR && (
-        <polygon points={data.map((_, i) => pt(i, zeroR).join(",")).join(" ")} fill="none" stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="3,3" />
-      )}
-      <polygon points={dataPath} fill="var(--text-primary)" fillOpacity="0.2" stroke="var(--text-primary)" strokeWidth="2" strokeLinejoin="round" />
-      {dataPts.map(([x, y], i) => (
-        data[i].hasData
-          ? <circle key={i} cx={x} cy={y} r="3.5" fill="var(--text-primary)" />
-          : <circle key={i} cx={x} cy={y} r="4" fill="var(--bg)" stroke="var(--text-secondary)" strokeWidth="1.5" strokeDasharray="2,2" />
-      ))}
-      {data.map((d, i) => {
-        const [lx, ly] = pt(i, outerR + 22);
-        return <text key={i} x={lx} y={ly} fontSize="10" fontWeight="700" fill="var(--text-primary)" textAnchor="middle" dominantBaseline="central">{d.label}</text>;
-      })}
+      <line x1={zeroX} y1={padT} x2={zeroX} y2={H - padT} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,3" />
     </svg>
   );
 }
@@ -1368,8 +1368,8 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
           {dots
-            ? (() => { const pt = dotGap, nc = Math.max(3, Math.floor(bw / pt) + 1), nr = Math.floor(h / pt), x0 = x + (bw - (nc - 1) * pt) / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r={dotR} fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.5} />); if (!nr) out.push(<circle key="z" cx={x0 + (nc - 1) * pt / 2} cy={H - padB - 2} r={dotR} fill="var(--border)" />); return out; })()
-            : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--accent)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
+            ? (() => { const pt = dotGap, nc = Math.max(3, Math.floor(bw / pt) + 1), nr = Math.floor(h / pt), x0 = x + (bw - (nc - 1) * pt) / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r={dotR} fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.5} />); if (!nr) out.push(<circle key="z" cx={x0 + (nc - 1) * pt / 2} cy={H - padB - 2} r={dotR} fill="var(--border)" />); return out; })()
+            : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
@@ -1386,7 +1386,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
   const labelW = 30, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
   const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
-  const colorFor = () => "var(--accent)";
+  const colorFor = () => "var(--gain)";
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: 220, cursor: "pointer" }} onClick={onTap}>
@@ -1395,7 +1395,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
         const pt = dotGap, N = Math.max(3, Math.round(cell / pt)), x0 = wi * (cell + gap) + (cell - (N - 1) * pt) / 2, y0 = di * (cell + gap) + (cell - (N - 1) * pt) / 2, out = [];
         const on = !day.future && day.count > 0;
         for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-          out.push(<circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r={on ? dotR : dotR * 0.75} fill={on ? "var(--accent)" : "var(--border)"} opacity={on ? 1 : day.future ? 0.5 : 0.9} />);
+          out.push(<circle key={`${wi}-${di}-${r}${c}`} cx={x0 + c * pt} cy={y0 + r * pt} r={on ? dotR : dotR * 0.75} fill={on ? "var(--gain)" : "var(--border)"} opacity={on ? 1 : day.future ? 0.5 : 0.9} />);
         }
         return <g key={`${wi}-${di}`}>{out}</g>;
       })) : weeks.map((week, wi) => week.map((day, di) => (
@@ -3833,11 +3833,13 @@ export default function Home() {
       {feedOpen && <FeedPage />}
       <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><DotIcon rows={DOT_PEOPLE} color="currentColor" size={24} /><span>Feed</span></button></div>
 
+      <div className="status-fade" aria-hidden="true" />
+      <div className="nav-scrim" aria-hidden="true" />
       <div className={"bottom-nav" + (feedOpen ? " feed-on" : "")} ref={navRef} style={{ "--i": activeSection === "charts" ? 2 : activeSection === "home" ? 1 : 0 }}>
         <span className="nav-lens" aria-hidden="true" />
 
-        <button aria-label="Overall" className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
-          <DotIcon rows={DOT_HOME} color="currentColor" /><span>Overall</span>
+        <button aria-label="Home" className={"bottom-nav-item bottom-nav-item-main" + (!feedOpen && activeSection === "portfolio" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("portfolio"); }}>
+          <DotIcon rows={DOT_HOME} color="currentColor" /><span>Home</span>
         </button>
         <button aria-label="Workout" className={"bottom-nav-item" + (!feedOpen && activeSection === "home" ? " active" : "")} onClick={() => { setFeedOpen(false); scrollToSection("home"); }}>
           <DotIcon rows={DOT_LIFT} color="currentColor" /><span>Workout</span>

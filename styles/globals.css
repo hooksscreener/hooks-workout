@@ -639,3 +639,57 @@ html.feed-open,html.feed-open body{overflow:hidden;overscroll-behavior:none;}
 @media (prefers-reduced-motion: reduce){
   .chip:active,.pill:active,.btn-iron:active,.bottom-nav-item:active,.feed-fab:active{transform:none;}
 }
+
+/* ======== Build 48: flatten the cards, one accent, one type rule ======== */
+
+/* Fade under the status bar so scrolling text never collides with the clock or Dynamic Island,
+   and a soft floor under the nav so content does not peek through the gaps around it. */
+.status-fade{position:fixed;top:0;left:0;right:0;height:calc(env(safe-area-inset-top) + 10px);background:linear-gradient(var(--bg) 55%,transparent);z-index:34;pointer-events:none;}
+.nav-scrim{position:fixed;left:0;right:0;bottom:0;height:calc(96px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 55%);z-index:39;pointer-events:none;}
+.feedpage ~ .status-fade{z-index:36;}
+
+/* No focus rings on things that are not controls (the stray white dotted box) */
+div:focus,section:focus,.st-grid:focus,.rec-card:focus{outline:none;}
+.st-mini{background:none;border:none !important;padding:var(--s-2) 0;margin:var(--s-2) 0 0;}
+
+/* Lists: rows with dotted dividers, not stacks of gray boxes */
+.hist-list,.today-list{gap:0;}
+.hist-item,.today-item{background:none !important;border:none !important;border-bottom:1px dotted var(--border) !important;border-radius:0 !important;padding:var(--s-2) 0 !important;}
+.hist-item:last-child,.today-item:last-child{border-bottom:none !important;}
+.swipe-wrap{border-radius:0;}
+.swipe-body{background:var(--bg);}
+.rec-card,[data-dotnums="on"] .rec-card{background:none;border-width:0 !important;border-top:1px dotted var(--border) !important;border-bottom:1px dotted var(--border) !important;border-radius:0;padding:var(--s-3) 0;}
+.rec-card .today-item{padding:var(--s-2) 0 !important;}
+.rec-card .today-item.top-set{border-bottom-color:var(--text-secondary) !important;}
+.rec-card .today-item.top-set span{color:var(--text-primary);font-weight:var(--fw-title);}
+.rec-card .today-item.sub-set{opacity:.8;}
+
+/* Weight and reps: one line each, underlined value between two round buttons */
+.step-btn{background:none;border:1px dotted var(--text-secondary);border-radius:50%;width:48px;height:48px;color:var(--text-primary);}
+.stepper-row input{background:none !important;border:none !important;border-bottom:1px dotted var(--text-secondary) !important;border-radius:0 !important;font-size:1.5rem;}
+input[type="text"]:not(.ios-switch),input[type="search"],input:not([type]),input[type="number"],input[inputmode="decimal"]{background:none;border-radius:0;border:none;border-bottom:1px dotted var(--text-secondary);}
+[data-dotnums="on"] input:not(.ios-switch):not([type=range]):not([type=checkbox]){border-style:none;border-bottom-style:dotted;}
+
+/* Disabled main action: outlined, not dim orange */
+.save-btn:disabled,.dock-save:disabled{background:none !important;color:var(--text-secondary) !important;border:1px dotted var(--text-secondary) !important;}
+
+/* Accent only for the main action and the active state */
+.fp-avatar{border-color:var(--text-secondary);color:var(--text-primary);}
+.compare-chip,.overall-screen .compare-link,.rec-main{color:var(--text-primary);}
+[data-theme="light"] .compare-chip{color:var(--text-primary);}
+.tut-caret{color:var(--text-primary);}
+
+/* Toggle knob: white on, white off */
+input.ios-switch:checked::after{background:#fff;}
+
+/* Type rule: the dot font is for numbers, headings, tickers and short labels. Sentences are IBM Plex. */
+.rec-note,.rec-empty,.empty,.chart-note,.toggle-row span,.sheet-settings p,.sheet-settings label,.info-text,.tut-text,.dup-prompt,.warn,.feedback-box,.insight-item{font-family:"IBM Plex Sans",-apple-system,sans-serif !important;font-weight:400 !important;letter-spacing:0 !important;}
+.chart-note,.rec-note,.rec-empty{color:var(--text-secondary);}
+
+/* Settings sheet starts below the safe area so the gear does not show behind its header */
+.sheet-settings{max-height:calc(100vh - env(safe-area-inset-top) - 24px);}
+
+/* Tap targets */
+.date-row button:not(.date-pill){font-size:1.5rem;color:var(--text-primary);}
+.date-row{margin-bottom:var(--s-4);}
+
