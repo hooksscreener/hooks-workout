@@ -30,7 +30,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 48 · Nov 15";
+const BUILD_TAG = "Build 50 · Nov 15";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -639,8 +639,8 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
       {...handlers}
     >
       <defs>
-        <pattern id="dotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="var(--gain)" fillOpacity="0.55" /></pattern>
-        <pattern id="dotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="var(--loss)" fillOpacity="0.55" /></pattern>
+        <pattern id="dotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="var(--gain)" fillOpacity="0.75" /></pattern>
+        <pattern id="dotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="var(--loss)" fillOpacity="0.75" /></pattern>
       </defs>
       <rect data-bg="1" x="0" y="0" width={W} height={H} fill="transparent" />
       {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
@@ -1279,33 +1279,36 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
 }
 
 function RadarChart({ data, rangeLabel, onTap }) {
-  // Despite the old name this is now a set of horizontal bars: one per muscle group, green up, red down, from a zero line.
-  const W = 320, rowH = 46, padT = 6, labelW = 52, valW = 52, barX = labelW, barW = W - labelW - valW;
+  // Horizontal bars, one per muscle group: green up, red down, from a zero line. Label, bar and value sit close together and the group is centered in the card.
+  const W = 320, rowH = 44, padT = 4, labelW = 44, valW = 46, gap = 8;
   const H = data.length * rowH + padT * 2;
   const vals = data.map((d) => d.value);
   const minV = Math.min(0, ...vals), maxV = Math.max(...vals, 5);
+  const barX = labelW + gap, barW = W - barX - valW - gap;
   const sx = (v) => barX + ((v - minV) / (maxV - minV || 1)) * barW;
   const zeroX = sx(0);
+  const top = padT + (rowH - 22) / 2, bottom = H - padT - (rowH - 22) / 2;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "pointer" }} onClick={onTap} role="img" aria-label="Strength growth by category">
       <defs>
-        <pattern id="barDotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="var(--gain)" /></pattern>
-        <pattern id="barDotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="var(--loss)" /></pattern>
+        <pattern id="barDotsGain" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.35" fill="var(--gain)" /></pattern>
+        <pattern id="barDotsLoss" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.35" fill="var(--loss)" /></pattern>
       </defs>
       {data.map((d, i) => {
         const y = padT + i * rowH, cy = y + rowH / 2, up = d.value >= 0;
         const x1 = Math.min(zeroX, sx(d.value)), w = Math.max(Math.abs(sx(d.value) - zeroX), d.hasData ? 2 : 0);
         const col = up ? "var(--gain)" : "var(--loss)";
+        const endX = up ? x1 + w : x1;
         return (
           <g key={d.label}>
-            <text x={0} y={cy} fontSize="12" fontWeight="600" fill="var(--text-primary)" dominantBaseline="central" fontFamily="'IBM Plex Sans',-apple-system,sans-serif">{d.label}</text>
-            {d.hasData && <rect x={x1} y={cy - 10} width={w} height={20} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
-            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={cy - 10} width={2} height={20} fill={col} />}
-            <text x={W} y={cy} fontSize="13" fontWeight="600" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor="end" dominantBaseline="central">{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
+            <text x={labelW} y={cy} fontSize="13" fill="var(--text-primary)" textAnchor="end" dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 600 }}>{d.label}</text>
+            {d.hasData && <rect x={x1} y={cy - 11} width={w} height={22} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
+            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={cy - 11} width={2} height={22} fill={col} />}
+            <text x={up ? endX + 8 : x1 - 8} y={cy} fontSize="14" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor={up ? "start" : "end"} dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 700 }}>{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
           </g>
         );
       })}
-      <line x1={zeroX} y1={padT} x2={zeroX} y2={H - padT} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,3" />
+      <line x1={zeroX} y1={top} x2={zeroX} y2={bottom} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,3" />
     </svg>
   );
 }
@@ -1352,7 +1355,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
   const W = 342, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
   const svgRef = useRef(null);
   const k = useSvgScale(svgRef);
-  const dotGap = MAIN_DOT_GAP / k, dotR = (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? 1.15 : 0.9) / k;
+  const dotGap = MAIN_DOT_GAP / k, dotR = (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? 1.4 : 0.9) / k;
   const max = Math.max(...weeks.map((w) => w.volume), 1);
   const n = weeks.length;
   const bw = (W - padL - padR) / n - 6;
@@ -1368,7 +1371,7 @@ function VolumeBarChart({ weeks, onTapBar, dots }) {
         return <g key={i} onClick={() => onTapBar && onTapBar(w)} style={{ cursor: "pointer" }}>
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
           {dots
-            ? (() => { const pt = dotGap, nc = Math.max(3, Math.floor(bw / pt) + 1), nr = Math.floor(h / pt), x0 = x + (bw - (nc - 1) * pt) / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r={dotR} fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.5} />); if (!nr) out.push(<circle key="z" cx={x0 + (nc - 1) * pt / 2} cy={H - padB - 2} r={dotR} fill="var(--border)" />); return out; })()
+            ? (() => { const pt = dotGap, nc = Math.max(3, Math.floor(bw / pt) + 1), nr = Math.floor(h / pt), x0 = x + (bw - (nc - 1) * pt) / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r={dotR} fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.72} />); if (!nr) out.push(<circle key="z" cx={x0 + (nc - 1) * pt / 2} cy={H - padB - 2} r={dotR} fill="var(--border)" />); return out; })()
             : <rect x={x} y={H - padB - h} width={bw} height={h} rx="3" fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.45} />}
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
         </g>;
@@ -1382,7 +1385,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots }) {
   const cell = 20, gap = 4;
   const svgRef = useRef(null);
   const k = useSvgScale(svgRef);
-  const dotGap = MAIN_DOT_GAP / k, dotR = (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? 1.15 : 0.9) / k;
+  const dotGap = MAIN_DOT_GAP / k, dotR = (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? 1.4 : 0.9) / k;
   const labelW = 30, DAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
   const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
@@ -3220,7 +3223,7 @@ export default function Home() {
             <div className="ex-input-wrap">
               <input
                 className="ex-input"
-                placeholder="Search or add an exercise"
+                placeholder="Search exercises"
                 value={form.exercise}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -3339,7 +3342,7 @@ export default function Home() {
             )}
 
             <div className="stepper-list" style={{ marginTop: 12 }}>
-              {[["weight", `Weight (${unit})`, unit, "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "reps", "numeric", 1]].map(([key, label, ph, mode, step]) => (
+              {[["weight", `Weight (${unit})`, "0", "decimal", unit === "kg" ? 2.5 : 5], ["reps", "Reps", "0", "numeric", 1]].map(([key, label, ph, mode, step]) => (
                 <div key={key} className="stepper-field">
                   <div className="label-sm stepper-label">{label}</div>
                   <div className="stepper-row">

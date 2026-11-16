@@ -693,3 +693,11 @@ input.ios-switch:checked::after{background:#fff;}
 .date-row button:not(.date-pill){font-size:1.5rem;color:var(--text-primary);}
 .date-row{margin-bottom:var(--s-4);}
 
+
+/* ======== Build 49: finish ======== */
+/* Cards on Progress and Settings become open sections with a dotted rule, like the rest of the app */
+.card:not(.flat){background:none !important;border-width:0 !important;border-top:1px dotted var(--border) !important;border-radius:0 !important;padding-left:0 !important;padding-right:0 !important;}
+/* Warm-up and other toggle chips: dotted outline, not a gray pill */
+.chip{background:none;border:1px dotted var(--text-secondary);}
+.chip.active{border-color:var(--accent);color:var(--accent);}
+.rec-empty{font-size:.9375rem;}
