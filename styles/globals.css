@@ -777,10 +777,15 @@ html.bd-open,html.bd-open body{overflow:hidden !important;}
 .xpage.leaving{animation:xpOut .3s cubic-bezier(.32,.72,0,1) forwards;pointer-events:none;}
 @media (prefers-reduced-motion:reduce){.xpage,.xpage.leaving{animation:none;}}
 /* Empty weight and rep boxes show a round zero */
-.stepper-row input::placeholder{font-family:"IBM Plex Sans",system-ui,sans-serif !important;font-weight:300;opacity:.55;}
+.stepper-row input::placeholder{color:transparent !important;}
 
 /* Build 65 */
 /* No circle or box around the weight and rep + and - */
 .step-btn,.step-btn:active{border:none !important;background:none !important;border-radius:0;}
 /* Clear X: dot X in a plain circle */
 .clear-x{border:1.5px dotted var(--text-secondary);}
+
+/* Build 67 */
+.stepper-in{position:relative;flex:1;min-width:0;display:flex;}
+.stepper-in input{width:100%;}
+.stepper-zero{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:var(--text-secondary);opacity:.6;}

@@ -34,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
-const BUILD_TAG = "Build 66 · Nov 20";
+const BUILD_TAG = "Build 67 · Nov 20";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -1073,6 +1073,7 @@ function DotIcon({ rows, color, size = 26 }) {
 }
 const DOT_PLUS = ["..#..","..#..","#####","..#..","..#.."];
 const DOT_MINUS = ["#####"];
+const DOT_ZERO = [".###.","#...#","#...#","#...#","#...#","#...#",".###."]; // round zero shown in empty weight and rep boxes
 const DOT_X = ["#...#",".#.#.","..#..",".#.#.","#...#"];
 const DOT_HOME = [".....#.....","....#.#....","...#...#...","..#.....#..",".#.......#.","..#.....#..","..#.###.#..","..#.#.#.#..","..#.#.#.#..","..#######.."];
 const DOT_LIFT = ["..##.....##..",".###.....###.","####.....####","#############","####.....####",".###.....###.","..##.....##.."];
@@ -2208,7 +2209,8 @@ export default function Home() {
     const home = findExerciseHome(name);
     if (home) setActiveWorkoutId(home);
   };
-  const swapTarget = recentExercises.find((n) => n !== form.exercise.trim()) || null;
+  const dropKeyboard = () => { try { const a = document.activeElement; if (a && a.blur && a.tagName === "INPUT") a.blur(); } catch (e) { /* ignore */ } };
+  const swapTarget = recExercise ? (recentExercises.find((n) => n !== form.exercise.trim()) || null) : null;
 
   const startRest = (name) => {
     const total = (restTimes && restTimes[name]) || restSecondsFor(name);
@@ -3307,7 +3309,7 @@ export default function Home() {
               {showSuggestions && suggestions.length > 0 && (
                 <div className="suggestions">
                   {suggestions.map((s) => (
-                    <button key={s} onPointerDown={(ev) => { ev.preventDefault(); selectExercise(s); }} onClick={() => selectExercise(s)}>{displayEx(s)}</button>
+                    <button key={s} onPointerDown={(ev) => { ev.preventDefault(); selectExercise(s); dropKeyboard(); }} onClick={() => { selectExercise(s); dropKeyboard(); }}>{displayEx(s)}</button>
                   ))}
                 </div>
               )}
@@ -3411,7 +3413,10 @@ export default function Home() {
                   <div className="label-sm stepper-label">{label}</div>
                   <div className="stepper-row">
                     <button type="button" className="step-btn" aria-label={`Decrease ${label}`} onClick={() => bumpForm(key, -step)}><DotIcon rows={DOT_MINUS} color="currentColor" size={18} /></button>
-                    <input type="number" inputMode={mode} placeholder={ph} aria-label={label} value={form[key]} onFocus={(e) => { const t = e.target; setTimeout(() => t.select(), 0); }} onMouseUp={(e) => e.preventDefault()} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+                    <div className="stepper-in">
+                    {form[key] === "" && <span className="stepper-zero" aria-hidden="true"><DotIcon rows={DOT_ZERO} color="currentColor" size={15} /></span>}
+                    <input type="number" inputMode={mode} placeholder="" aria-label={label} value={form[key]} onFocus={(e) => { const t = e.target; setTimeout(() => t.select(), 0); }} onMouseUp={(e) => e.preventDefault()} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+                    </div>
                     <button type="button" className="step-btn" aria-label={`Increase ${label}`} onClick={() => bumpForm(key, step)}><DotIcon rows={DOT_PLUS} color="currentColor" size={18} /></button>
                   </div>
                 </div>
@@ -3509,7 +3514,7 @@ export default function Home() {
                 {(chartFocusExercise || progQuery) && <ClearX label="Clear exercise" onClick={() => { setProgCleared(true); setChartFocusExercise(null); setProgQuery(""); setMergeOpen(false); setHistoryAll(false); setEditingId(null); }} />}
                 {progOpen && matches.length > 0 && (
                   <div className="suggestions">
-                    {matches.map((s2) => <button key={s2} onPointerDown={(ev) => { ev.preventDefault(); pickProg(s2); }} onClick={() => pickProg(s2)}>{s2}</button>)}
+                    {matches.map((s2) => <button key={s2} onPointerDown={(ev) => { ev.preventDefault(); pickProg(s2); dropKeyboard(); }} onClick={() => { pickProg(s2); dropKeyboard(); }}>{s2}</button>)}
                   </div>
                 )}
               </div>
