@@ -2,7 +2,7 @@ import { LEGAL_DOCS } from "../lib/legal";
 import Breakdown from "../lib/Breakdown";
 import { growthByCategory } from "../lib/analysis";
 import { LegalBody } from "../lib/LegalPage";
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, memo } from "react";
 import { deriveTheme, deriveFonts } from "../lib/theme";
 import { filterFeed, FEED_MODES } from "../lib/feedFilter";
 import { mockSocial } from "../lib/mockSocial";
@@ -33,8 +33,8 @@ const MA_OPTIONS = [
 ];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
-const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "your whole history" };
-const BUILD_TAG = "Build 61 · Nov 16";
+const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
+const BUILD_TAG = "Build 66 · Nov 20";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -670,7 +670,7 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
         const pts = [];
         rows.forEach((r, i) => { if (r[s] !== undefined) pts.push(`${x(i)},${y(r[s])}`); });
         return <g key={s}>
-          {series.length === 1 && pts.length > 1 && <polygon points={`${pts[0].split(",")[0]},${H - padB} ${pts.join(" ")} ${pts[pts.length - 1].split(",")[0]},${H - padB}`} fill={series.length === 1 && trendColor === "var(--loss)" ? "url(#dotsLoss)" : "url(#dotsGain)"} />}
+          {series.length === 1 && pts.length > 1 && <AreaDots pts={pts} baseY={H - padB} color={trendColor === "var(--loss)" ? "var(--loss)" : "var(--gain)"} />}
           <polyline points={pts.join(" ")} fill="none" stroke={colorOf(si)} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         </g>;
       })}
@@ -755,7 +755,7 @@ function planNext(hist, mode, todayIso) {
 
   const plateaued = plateauFlag(ws);
   const bumpSize = topW >= 100 ? 10 : 5;
-  const tw = topW < 0 ? `BW - ${-topW} lbs` : topW === 0 ? "BW" : `${tw}`; // how the top weight reads in notes
+  const tw = topW < 0 ? `BW - ${-topW} lbs` : topW === 0 ? "BW" : `${topW}`; // how the top weight reads in notes
   let nextTopWeight = topW, low, high, note, bumped = false;
 
   if (mode !== "reps" && lastTop.reps >= REC_HIGH) {
@@ -1073,6 +1073,7 @@ function DotIcon({ rows, color, size = 26 }) {
 }
 const DOT_PLUS = ["..#..","..#..","#####","..#..","..#.."];
 const DOT_MINUS = ["#####"];
+const DOT_X = ["#...#",".#.#.","..#..",".#.#.","#...#"];
 const DOT_HOME = [".....#.....","....#.#....","...#...#...","..#.....#..",".#.......#.","..#.....#..","..#.###.#..","..#.#.#.#..","..#.#.#.#..","..#######.."];
 const DOT_LIFT = ["..##.....##..",".###.....###.","####.....####","#############","####.....####",".###.....###.","..##.....##.."];
 const DOT_CHART = ["........##.","........##.","........##.","........##.","....##..##.","....##..##.","....##..##.","##..##..##.","##..##..##.","##..##..##."];
@@ -1085,10 +1086,29 @@ function IconDumbbell({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color
 function IconChart({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M4 20V4" /><path d="M4 20h16" /><path d="M7 16l4-5 3 3 5-7" /></svg>; }
 function IconFeed({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.4" /><path d="M2.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5" /><path d="M15 15c.7-.4 1.4-.5 2-.5 2.5 0 4.5 1.8 4.5 4.5" /></svg>; }
 function IconBulb({ color }) { return <svg {...NAV_ICON_PROPS} stroke={color}><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a6 6 0 00-4 10.5c.7.6 1 1.3 1 2.5h6c0-1.2.3-1.9 1-2.5A6 6 0 0012 2z" /></svg>; }
+// Dots under a line, laid on a 4px grid. Only whole dots are drawn: none are cut by the line or the baseline.
+const AreaDots = memo(function AreaDots({ pts, baseY, color }) {
+  const d = useMemo(() => {
+    const P = pts.map((q) => q.split(",").map(Number));
+    if (P.length < 2) return "";
+    const x0 = P[0][0], x1 = P[P.length - 1][0];
+    let out = "", k = 0;
+    const startX = Math.ceil((x0 + 1.5 - 2) / 4) * 4 + 2;
+    for (let cx = startX; cx <= x1 - 1.5; cx += 4) {
+      while (k < P.length - 2 && P[k + 1][0] < cx) k++;
+      const a = P[k], b = P[k + 1], f = b[0] === a[0] ? 0 : Math.min(1, Math.max(0, (cx - a[0]) / (b[0] - a[0])));
+      const ly = a[1] + (b[1] - a[1]) * f;
+      for (let cy = baseY - 1.2; cy >= ly + 2.7; cy -= 4) out += `M${cx} ${cy}h0`;
+    }
+    return out;
+  }, [pts, baseY]);
+  return <path d={d} stroke={color} strokeOpacity="0.75" strokeWidth="2" strokeLinecap="round" fill="none" />;
+});
+
 function ClearX({ onClick, label }) {
   return (
     <button type="button" className="clear-x" aria-label={label} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M2 2l6 6M8 2l-6 6" /></svg>
+      <DotIcon rows={DOT_X} color="currentColor" size={12} />
     </button>
   );
 }
@@ -1204,7 +1224,8 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
     for (let gx = 1.6; gx < W; gx += DOT_GAP) {
       const ly = lineYAt(gx);
       for (let gy = 1.6; gy < H; gy += DOT_GAP) {
-        if (gy < ly) continue;
+        if (gy < ly + 2.7) continue; // keep whole dots clear of the line stroke
+        if (gy > H - 1.5) break;
         if (gy > revealRef.current * H) break; // start-up: the dots come in from the top, row by row
         const a = fadeAt(gy);
         if (a < 0.02) continue;
@@ -1227,7 +1248,7 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
       if (gx < 0 || gx > W) continue;
       const ly = lineYAt(gx);
       for (let gy = Math.floor(ay / DOT_GAP) * DOT_GAP + 1.6; gy < ay + ry; gy += DOT_GAP) {
-        if (gy < ly || gy > H) continue;
+        if (gy < ly + 2.7 || gy > H - 1.5) continue;
         const dx = (gx - ax) / rx, dy = (gy - ay) / ry, d2 = dx * dx + dy * dy;
         if (d2 >= 1) continue;
         const k = (1 - d2) * (1 - d2);
@@ -1325,7 +1346,6 @@ function RadarChart({ data, rangeLabel, onTap }) {
           <g key={d.label} onClick={(ev) => { ev.stopPropagation(); if (onTap) onTap(d.id); }}>
             <text x={labelW} y={cy} fontSize="13" fill="var(--text-primary)" textAnchor="end" dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 600 }}>{d.label}</text>
             {d.hasData && <rect x={x1} y={by} width={w} height={24} fill={up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
-            {d.hasData && <rect x={up ? x1 + w - 2 : x1} y={by} width={2} height={24} fill={col} />}
             <text x={up ? endX + 8 : x1 - 8} y={cy} fontSize="14" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor={up ? "start" : "end"} dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 700 }}>{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
           </g>
         );
@@ -2987,7 +3007,9 @@ export default function Home() {
   const fillTimer = useRef(null);
   const undoTimer = useRef(null);
   const openExercise = (exercise, date, ytd, range) => { setXpage({ exercise, date, ytd: !!ytd, range: range || (ytd ? "ytd" : "all") }); setXEdit(false); setXScrub(null); setEditingId(null); };
-  const closeExercise = () => { setXpage(null); setXEdit(false); setXScrub(null); setEditingId(null); };
+  const closeExercise = (e) => slideOut(e, closeExerciseNow);
+  const slideOut = (e, fn) => { const el = e && e.currentTarget && e.currentTarget.closest ? e.currentTarget.closest(".xpage") : null; if (!el || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) { fn(); return; } if (el.classList.contains("leaving")) return; el.classList.add("leaving"); setTimeout(fn, 300); };
+  const closeExerciseNow = () => { setXpage(null); setXEdit(false); setXScrub(null); setEditingId(null); };
   useEffect(() => {
     if (!xpage) return undefined;
     const prev = document.body.style.overflow;
@@ -3184,7 +3206,7 @@ export default function Home() {
                     ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} intro={introOn} />
                     : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
-                  {!scrubPoint && <span className="plain-line">{`Your strength is ${up ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% over ${RANGE_WORDS[portfolioRange] || "this range"}.`}</span>}
+                  {!scrubPoint && <span className="plain-line">{`Your strength is ${up ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% ${portfolioRange === "all" ? "all time" : "over " + (RANGE_WORDS[portfolioRange] || "this range")}.`}</span>}
                 </>
               );
             })()}
@@ -3279,13 +3301,13 @@ export default function Home() {
                   if (!exact) setRecExercise(null);
                 }}
                 onFocus={(e) => { setShowSuggestions(true); setTimeout(() => e.target.scrollIntoView({ behavior: (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? "auto" : "smooth", block: "center" }), 300); }}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 400)}
               />
               {form.exercise.trim() && <ClearX label="Clear exercise" onClick={clearForm} />}
               {showSuggestions && suggestions.length > 0 && (
                 <div className="suggestions">
                   {suggestions.map((s) => (
-                    <button key={s} onClick={() => selectExercise(s)}>{displayEx(s)}</button>
+                    <button key={s} onPointerDown={(ev) => { ev.preventDefault(); selectExercise(s); }} onClick={() => selectExercise(s)}>{displayEx(s)}</button>
                   ))}
                 </div>
               )}
@@ -3317,9 +3339,7 @@ export default function Home() {
               </div>
             )}
 
-            {!recExercise ? (
-              <div className="rec-empty">Pick an exercise to see today's target, or tap + Add new exercise.</div>
-            ) : recommendation?.noData ? (
+            {!recExercise ? null : recommendation?.noData ? (
               <div className="rec-card">
                 <div className="label-sm">What's your strongest set?</div>
                 <div style={{ fontSize: "var(--fs-label)", color: "var(--text-primary)", lineHeight: 1.5, marginBottom: 12 }}>
@@ -3484,12 +3504,12 @@ export default function Home() {
                   value={progOpen ? progQuery : (chartFocusExercise || "")}
                   onChange={(e) => setProgQuery(e.target.value)}
                   onFocus={(e) => { setProgOpen(true); setProgQuery(""); e.target.select && e.target.select(); }}
-                  onBlur={() => setTimeout(() => setProgOpen(false), 150)}
+                  onBlur={() => setTimeout(() => setProgOpen(false), 400)}
                 />
                 {(chartFocusExercise || progQuery) && <ClearX label="Clear exercise" onClick={() => { setProgCleared(true); setChartFocusExercise(null); setProgQuery(""); setMergeOpen(false); setHistoryAll(false); setEditingId(null); }} />}
                 {progOpen && matches.length > 0 && (
                   <div className="suggestions">
-                    {matches.map((s2) => <button key={s2} onMouseDown={(ev) => ev.preventDefault()} onClick={() => pickProg(s2)}>{s2}</button>)}
+                    {matches.map((s2) => <button key={s2} onPointerDown={(ev) => { ev.preventDefault(); pickProg(s2); }} onClick={() => pickProg(s2)}>{s2}</button>)}
                   </div>
                 )}
               </div>
@@ -3517,9 +3537,7 @@ export default function Home() {
               >
                 <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={bodyweightInfo(entriesByExercise[chartFocusExercise] || [], settings.bodyWeight).repsMode ? "reps" : unit} />
               </div>
-              <div className="chart-note">
-                Tap the chart for the exercise overview. Best set of each day. Hold and drag for the exact reps, sets and weight.{chartMetric === "e1rm" && " Est. 1RM uses the Epley formula, counting up to 10 reps."}
-              </div>
+              {chartMetric === "e1rm" && <div className="chart-note">Est. 1RM uses the Epley formula, counting up to 10 reps.</div>}
             </div>
           )}
 
@@ -3617,7 +3635,7 @@ export default function Home() {
       {xpage && xData && (
         <div className="xpage" role="dialog" aria-label={xpage.exercise}>
           <div className="xp-top">
-            <button type="button" className="xp-back" onClick={closeExercise} aria-label="Back"><svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L2 10l8 8" /></svg></button>
+            <button type="button" className="xp-back" onClick={(e) => closeExercise(e)} aria-label="Back"><svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L2 10l8 8" /></svg></button>
             <div className="xp-title">{displayEx(xpage.exercise)}</div>
           </div>
           <div className="xp-scroll">

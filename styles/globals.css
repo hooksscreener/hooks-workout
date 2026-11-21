@@ -760,3 +760,27 @@ html.scrub-lock,html.scrub-lock body{overflow:hidden !important;overscroll-behav
 .bd-bar span,.bd-stack span{background-repeat:space space;}
 .bd-stack{gap:4px;}
 .bd-stack span{min-width:4px;}
+
+/* Build 62 */
+html.bd-open,html.bd-open body{overflow:hidden !important;}
+.bd-chip{background:none;border:0;border-bottom:1px solid transparent;padding:6px 2px;min-height:32px;cursor:pointer;font-family:inherit;color:var(--text-secondary);}
+.bd-chip.on{color:var(--text-primary);border-bottom:1px dotted var(--accent);}
+
+
+/* ======== Build 64 ======== */
+/* Selected chip: tinted fill with accent text (was solid accent fill with accent text, so unreadable) */
+.chip.active{background:color-mix(in srgb,var(--accent) 18%,transparent);border:1px solid var(--accent);color:var(--accent);}
+/* Full-screen pages slide in from the right like iOS, and slide back out */
+@keyframes xpIn{from{transform:translateX(100%);}to{transform:translateX(0);}}
+@keyframes xpOut{from{transform:translateX(0);}to{transform:translateX(100%);}}
+.xpage{animation:xpIn .34s cubic-bezier(.32,.72,0,1);box-shadow:-12px 0 24px rgba(0,0,0,.35);}
+.xpage.leaving{animation:xpOut .3s cubic-bezier(.32,.72,0,1) forwards;pointer-events:none;}
+@media (prefers-reduced-motion:reduce){.xpage,.xpage.leaving{animation:none;}}
+/* Empty weight and rep boxes show a round zero */
+.stepper-row input::placeholder{font-family:"IBM Plex Sans",system-ui,sans-serif !important;font-weight:300;opacity:.55;}
+
+/* Build 65 */
+/* No circle or box around the weight and rep + and - */
+.step-btn,.step-btn:active{border:none !important;background:none !important;border-radius:0;}
+/* Clear X: dot X in a plain circle */
+.clear-x{border:1.5px dotted var(--text-secondary);}
