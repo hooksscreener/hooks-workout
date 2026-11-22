@@ -34,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
-const BUILD_TAG = "Build 67 · Nov 20";
+const BUILD_TAG = "Build 68 · Nov 20";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -1099,7 +1099,10 @@ const AreaDots = memo(function AreaDots({ pts, baseY, color }) {
       while (k < P.length - 2 && P[k + 1][0] < cx) k++;
       const a = P[k], b = P[k + 1], f = b[0] === a[0] ? 0 : Math.min(1, Math.max(0, (cx - a[0]) / (b[0] - a[0])));
       const ly = a[1] + (b[1] - a[1]) * f;
-      for (let cy = baseY - 1.2; cy >= ly + 2.7; cy -= 4) out += `M${cx} ${cy}h0`;
+      const top = ly + 2.7, bot = baseY - 1.2;
+      if (bot < top) continue;
+      const cnt = Math.floor((bot - top) / 4) + 1, step = cnt > 1 ? (bot - top) / (cnt - 1) : 0; // first dot under the line, last on the baseline
+      for (let j = 0; j < cnt; j++) out += `M${cx} ${top + j * step}h0`;
     }
     return out;
   }, [pts, baseY]);
@@ -1224,8 +1227,7 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
     const li = document.documentElement.getAttribute("data-theme") === "light";
     for (let gx = 1.6; gx < W; gx += DOT_GAP) {
       const ly = lineYAt(gx);
-      for (let gy = 1.6; gy < H; gy += DOT_GAP) {
-        if (gy < ly + 2.7) continue; // keep whole dots clear of the line stroke
+      for (let gy = ly + 2.7; gy < H; gy += DOT_GAP) { // first dot sits right under the line stroke, so there is no empty strip
         if (gy > H - 1.5) break;
         if (gy > revealRef.current * H) break; // start-up: the dots come in from the top, row by row
         const a = fadeAt(gy);
@@ -1248,8 +1250,9 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false }) {
     for (let gx = startX; gx < ax + rx; gx += DOT_GAP) {
       if (gx < 0 || gx > W) continue;
       const ly = lineYAt(gx);
-      for (let gy = Math.floor(ay / DOT_GAP) * DOT_GAP + 1.6; gy < ay + ry; gy += DOT_GAP) {
-        if (gy < ly + 2.7 || gy > H - 1.5) continue;
+      const gy0 = ly + 2.7, gyStart = gy0 + Math.max(0, Math.ceil((ay - ry - gy0) / DOT_GAP)) * DOT_GAP;
+      for (let gy = gyStart; gy < ay + ry; gy += DOT_GAP) {
+        if (gy > H - 1.5) break;
         const dx = (gx - ax) / rx, dy = (gy - ay) / ry, d2 = dx * dx + dy * dy;
         if (d2 >= 1) continue;
         const k = (1 - d2) * (1 - d2);
@@ -3066,7 +3069,7 @@ export default function Home() {
   const pullY0 = useRef(0);
   const pullX0 = useRef(0);
   const pullAtTop = useRef(false);
-  const onPullStart = (e) => { pullY0.current = e.touches[0].clientY; pullX0.current = e.touches[0].clientX; pullAtTop.current = window.scrollY <= 1; pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
+  const onPullStart = (e) => { if (e.target && e.target.closest && e.target.closest(".pf-chart")) { pull.current = null; pullAtTop.current = false; return; } pullY0.current = e.touches[0].clientY; pullX0.current = e.touches[0].clientX; pullAtTop.current = window.scrollY <= 1; pull.current = window.scrollY <= 0 ? e.touches[0].clientY : null; };
   const TITLE_MAX = 64;
   const [titlePull, setTitlePull] = useState(0);
   const [titleDrag, setTitleDrag] = useState(false);

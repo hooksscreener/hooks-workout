@@ -789,3 +789,6 @@ html.bd-open,html.bd-open body{overflow:hidden !important;}
 .stepper-in{position:relative;flex:1;min-width:0;display:flex;}
 .stepper-in input{width:100%;}
 .stepper-zero{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:var(--text-secondary);opacity:.6;}
+
+/* Build 68: selected-range dots are whole and evenly spread across the label */
+[data-dotnums="on"] .pills.range-tabs .pill.active .tab-l::after,[data-dotnums="on"] .pills-sub .pill-sm.active .tab-l::after{background:radial-gradient(circle at 2.5px 2px,var(--accent) 1.5px,transparent 1.9px) 0 0/5px 4px space no-repeat;}
