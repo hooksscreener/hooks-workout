@@ -34,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
-const BUILD_TAG = "Build 68 · Nov 20";
+const BUILD_TAG = "Build 70 · Nov 22";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -43,6 +43,27 @@ const PENDING_KEY = "hooksPending"; // "1" while this phone has changes the serv
 const pad = (n) => String(n).padStart(2, "0");
 const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const todayISO = () => toISO(new Date());
+// A workout session ends when 2 hours pass with no logged set. A set's time comes from its id (the time it was logged);
+// sets backdated to another day, or from older data without a usable time, count as one session for that day.
+const SESSION_GAP_MS = 2 * 60 * 60 * 1000;
+const tsOf = (e) => {
+  const m = /^(\d{13})-/.exec(String(e.id || ""));
+  const t = m ? Number(m[1]) : NaN;
+  return t > 1e12 && toISO(new Date(t)) === e.date ? t : null;
+};
+// Which exercise opens each kind of day when there is no history yet: a big compound lift that belongs to it.
+const STARTER_LIFTS = [
+  [/push|chest/i, [/^bench press$/i, /bench press/i, /overhead press|shoulder press/i]],
+  [/pull|back/i, [/^deadlift$/i, /deadlift/i, /barbell rows?/i, /pull-?ups?/i]],
+  [/leg|quad|lower/i, [/back squat/i, /^squats?$/i, /squat/i, /leg press/i]],
+  [/arm/i, [/close-grip bench/i, /barbell curl/i, /preacher/i]],
+];
+const starterLift = (dayName, list) => {
+  const row = STARTER_LIFTS.find(([re]) => re.test(dayName || ""));
+  if (!row) return null;
+  for (const re of row[1]) { const hit = (list || []).find((n) => re.test(n)); if (hit) return hit; }
+  return null;
+};
 // Dates from an earlier year carry a 'yy suffix so "Aug 23" can't be mistaken for this year's.
 const fmtDate = (iso) => { const [y, m, d] = iso.split("-"); const yr = +y < new Date().getFullYear() ? ` '${y.slice(2)}` : ""; return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m - 1]} ${+d}${yr}`; };
 const fmtDateFull = (iso) => { if (iso === todayISO()) return `Today, ${fmtDate(iso)}`; const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); };
@@ -254,7 +275,7 @@ const defaultTicker = (name) => {
   return res.slice(0, 5);
 };
 // Stats for one exercise. Working sets only. rangeFrom/rangeTo bound the "this range" numbers.
-function exStats(list, fromISO, toISOd, repsMode = false) {
+function exStats(list, fromISO, toISOd, repsMode = false, sessOf = null) {
   const work = list.filter((e) => !e.isWarmup);
   if (!work.length) return null;
   const vol = (arr) => arr.reduce((a, e) => a + e.weight * Math.max(e.reps, 0) * (e.sets || 1), 0);
@@ -268,7 +289,7 @@ function exStats(list, fromISO, toISOd, repsMode = false) {
   const allDates = [...new Set(work.map((e) => e.date))].sort();
   return {
     e1rm: repsMode ? best.reps : e1(best), e5rm: repsMode ? Math.round(inR.reduce((a, e) => a + e.reps, 0) / Math.max(inR.length, 1)) : estE5RM(best.weight, best.reps, !!best.bw),
-    volume: vol(inR), sessions: dates.length, sets, reps,
+    volume: vol(inR), sessions: sessOf ? new Set(inR.map((e) => sessOf[e.id] || e.date)).size : dates.length, sets, reps,
     prWeight: repsMode ? pr.reps : pr.weight, prEntry: pr, prDate: pr.date,
     avgPerRep: reps > 0 ? Math.round(vol(inR) / reps) : 0,
     lastDate: last.date, lastSet: last,
@@ -1075,6 +1096,20 @@ const DOT_PLUS = ["..#..","..#..","#####","..#..","..#.."];
 const DOT_MINUS = ["#####"];
 const DOT_ZERO = [".###.","#...#","#...#","#...#","#...#","#...#",".###."]; // round zero shown in empty weight and rep boxes
 const DOT_X = ["#...#",".#.#.","..#..",".#.#.","#...#"];
+// Dot-matrix gear for the settings button: eight teeth around a round body with a hole in the middle (11 by 11 dots).
+const DOT_GEAR = [
+  "....###....",
+  ".##.###.##.",
+  ".#########.",
+  "..###.###..",
+  "###.....###",
+  "###.....###",
+  "###.....###",
+  "..###.###..",
+  ".#########.",
+  ".##.###.##.",
+  "....###....",
+];
 const DOT_HOME = [".....#.....","....#.#....","...#...#...","..#.....#..",".#.......#.","..#.....#..","..#.###.#..","..#.#.#.#..","..#.#.#.#..","..#######.."];
 const DOT_LIFT = ["..##.....##..",".###.....###.","####.....####","#############","####.....####",".###.....###.","..##.....##.."];
 const DOT_CHART = ["........##.","........##.","........##.","........##.","....##..##.","....##..##.","....##..##.","##..##..##.","##..##..##.","##..##..##."];
@@ -1333,7 +1368,6 @@ function RadarChart({ data, rangeLabel, onTap }) {
   const barX = labelW + gap, barW = W - barX - valW - gap;
   const sx = (v) => barX + ((v - minV) / (maxV - minV || 1)) * barW;
   const zeroX = Math.round(sx(0) / 4) * 4;
-  const top = padT + (rowH - 22) / 2, bottom = H - padT - (rowH - 22) / 2;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "pointer" }} onClick={onTap} role="img" aria-label="Strength growth by category">
       <defs>
@@ -1354,7 +1388,6 @@ function RadarChart({ data, rangeLabel, onTap }) {
           </g>
         );
       })}
-      <line x1={zeroX} y1={top} x2={zeroX} y2={bottom} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="2,3" />
     </svg>
   );
 }
@@ -1669,8 +1702,8 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addingExercise, setAddingExercise] = useState(false);
   const editScanRef = useRef(null);
-  // "That's about 7 Ford F-150s." Facts come from lib/compare.js; the playful one-liner only shows if you turn it on in Settings.
-  const compareLine = (lbs, seed) => { const c = compareWeight(lbs, seed); return c ? `That's ${c.text}.${settings.playful && c.quip ? " " + c.quip : ""}` : null; };
+  // "That's about 7 Ford F-150s." Facts come from lib/compare.js.
+  const compareLine = (lbs, seed) => { const c = compareWeight(lbs, seed); return c ? `That's ${c.text}.` : null; };
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newExerciseBrand, setNewExerciseBrand] = useState("");
   const [newExerciseTicker, setNewExerciseTicker] = useState("");
@@ -2103,6 +2136,13 @@ export default function Home() {
     entries.forEach((e) => { if (!e.isWarmup && !(e.weight > 0)) set.add(e.exercise); });
     return set;
   }, [entries]);
+  // Strictly bodyweight lifts (pull-ups, push-ups, sit-ups, muscle-ups): every working set was logged with no added or assist weight.
+  // For these, Est. max and e5RM are shown as real rep counts, not weight.
+  const strictBwNames = useMemo(() => {
+    const seen = {};
+    entries.forEach((e) => { if (e.isWarmup) return; seen[e.exercise] = (seen[e.exercise] === undefined ? true : seen[e.exercise]) && !e.weight; });
+    return new Set(Object.keys(seen).filter((k) => seen[k]));
+  }, [entries]);
   const canGoNegative = (name) => !!name && (bwNames.has(name) || /pull|chin|dip|push|assist/i.test(name));
 
   // Warm-up sets are real reps, but they're not a signal of strength: every recommendation, chart,
@@ -2130,14 +2170,39 @@ export default function Home() {
 
   const todaysEntries = entries.filter((e) => e.date === selectedDate);
 
+  // Sessions: sets less than 2 hours apart belong together, so a second workout later the same day is its own session.
+  const sessionOfId = useMemo(() => {
+    const map = {}, byDate = {};
+    entries.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    Object.entries(byDate).forEach(([date, day]) => {
+      const timed = day.map((e) => [e, tsOf(e)]).filter((x) => x[1] !== null).sort((a, b) => a[1] - b[1]);
+      let n = 0, prev = null;
+      timed.forEach(([e, t]) => { if (prev !== null && t - prev >= SESSION_GAP_MS) n++; prev = t; map[e.id] = `${date}#${n}`; });
+      day.forEach((e) => { if (!(e.id in map)) map[e.id] = `${date}#0`; });
+    });
+    return map;
+  }, [entries]);
+  // The session happening right now: the latest set logged today, if it was under 2 hours ago.
+  const latestToday = useMemo(() => {
+    let best = null;
+    entries.forEach((e) => { if (e.date !== todayISO()) return; const t = tsOf(e); if (t !== null && (!best || t > best.t)) best = { t, id: e.id }; });
+    return best;
+  }, [entries]);
+  const inCurrentSession = (e) => {
+    if (e.date !== todayISO()) return false;
+    if (tsOf(e) === null) return true;
+    return !!latestToday && Date.now() - latestToday.t < SESSION_GAP_MS && sessionOfId[e.id] === sessionOfId[latestToday.id];
+  };
+
   // ---- Recommendation for one exercise ------------------------------------------------------------
-  // Sets you're logging right now never change what's recommended for the rest of today's session;
-  // only completed earlier sessions count. Once today becomes "yesterday" it becomes the new basis.
+  // Sets you're logging right now never change what's recommended for the rest of this session;
+  // only completed earlier sessions count. A session ends 2 hours after its last logged set, so a later
+  // workout the same day starts fresh and builds on the earlier one.
   const buildRecommendation = (name, setCount, mWeight, mReps, sideArg) => {
     if (!name) return null;
     const sideNow = sideArg || logSide;
     const fullHist = oneSidedNow(name) && entriesByExerciseRaw[name] ? entriesByExerciseRaw[name].filter((e) => !e.side || e.side === sideNow) : entriesByExerciseRaw[name];
-    const priorHist = fullHist ? fullHist.filter((e) => e.date < todayISO()) : fullHist;
+    const priorHist = fullHist ? fullHist.filter((e) => !inCurrentSession(e)) : fullHist;
     const hist = priorHist && priorHist.length ? priorHist : fullHist;
     const hasManual = mWeight && mReps;
     if ((!hist || !hist.length) && !hasManual) return { noData: true };
@@ -2725,11 +2790,11 @@ export default function Home() {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e.isWarmup) continue;
-      const seq = (byDate[e.date] = byDate[e.date] || []);
+      const seq = (byDate[sessionOfId[e.id] || e.date] = byDate[sessionOfId[e.id] || e.date] || []);
       if (seq[seq.length - 1] !== e.exercise) seq.push(e.exercise);
     }
     return Object.values(byDate);
-  }, [entries]);
+  }, [entries, sessionOfId]);
   // Next-exercise suggestions only learn from the last 14 days, so a changed routine takes over quickly.
   const NEXT_WINDOW_DAYS = 14;
   const recentOrders = useMemo(() => {
@@ -2738,19 +2803,27 @@ export default function Home() {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e.isWarmup || e.date < cutoff) continue;
-      const seq = (byDate[e.date] = byDate[e.date] || []);
+      const seq = (byDate[sessionOfId[e.id] || e.date] = byDate[sessionOfId[e.id] || e.date] || []);
       if (seq[seq.length - 1] !== e.exercise) seq.push(e.exercise);
     }
     return Object.values(byDate);
-  }, [entries]);
+  }, [entries, sessionOfId]);
   const nextMap = useMemo(() => {
     const m = {};
     recentOrders.forEach((seq) => { for (let i = 0; i < seq.length - 1; i++) { const a = seq[i], b = seq[i + 1]; if (a === b) continue; ((m[a] = m[a] || {})[b] = (m[a][b] || 0) + 1); } });
     return m;
   }, [recentOrders]);
   const nextTarget = useMemo(() => {
-    if (!recExercise || !nextMap[recExercise]) return null;
-    const doneToday = new Set(todaysEntries.map((e) => e.exercise));
+    if (!recExercise) return null;
+    if (!nextMap[recExercise]) {
+      // No history for what usually follows this lift: offer the next one on the same day's list that is not done yet.
+      const done = new Set(todaysEntries.filter(inCurrentSession).map((e) => e.exercise.toLowerCase()));
+      const day = workouts.find((w) => (exercises[w.id] || []).some((n) => n.toLowerCase() === recExercise.toLowerCase()));
+      const list = day ? exercises[day.id] || [] : [];
+      const at = list.findIndex((n) => n.toLowerCase() === recExercise.toLowerCase());
+      return list.slice(at + 1).find((n) => !done.has(n.toLowerCase())) || null;
+    }
+    const doneToday = new Set(todaysEntries.filter(inCurrentSession).map((e) => e.exercise));
     // Only suggest lifts that share a workout day with this one (Bench can lead to Incline, not Squat).
     const lc = (n) => n.toLowerCase();
     const sameDay = new Set();
@@ -2766,7 +2839,8 @@ export default function Home() {
     const counts = {};
     sessionOrders.forEach((seq) => { const first = seq.find((n) => names.has(n.toLowerCase())); if (first) counts[first] = (counts[first] || 0) + 1; });
     const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    const pick = top ? top[0] : (exercises[workoutId] || [])[0];
+    const day = workouts.find((w) => w.id === workoutId);
+    const pick = top ? top[0] : starterLift(day && day.name, exercises[workoutId]) || (exercises[workoutId] || [])[0];
     setActiveWorkoutId(workoutId);
     if (pick) selectExercise(pick);
   };
@@ -3039,8 +3113,14 @@ export default function Home() {
     const bwInfo = bodyweightInfo(entriesByExercise[xpage.exercise] || [], settings.bodyWeight);
     const today = todayISO();
     const xr = xRangeOf(xpage);
-    return exStats(bwInfo.list, xr === "all" ? "0000-01-01" : rangeCutoffISO(xr), xr === "all" ? xpage.date : today, bwInfo.repsMode);
-  }, [xpage, entriesByExercise, settings.bodyWeight]);
+    const from = xr === "all" ? "0000-01-01" : rangeCutoffISO(xr), to = xr === "all" ? xpage.date : today;
+    const st = exStats(bwInfo.list, from, to, bwInfo.repsMode, sessionOfId);
+    if (st && !bwInfo.repsMode && strictBwNames.has(xpage.exercise)) {
+      const rs = exStats(bwInfo.list, from, to, true);
+      return { ...st, strictReps: true, bestReps: rs.e1rm, avgReps: rs.e5rm };
+    }
+    return st;
+  }, [xpage, entriesByExercise, settings.bodyWeight, strictBwNames, sessionOfId]);
 
   // ---- Carousel: pull down at the top of Overall to see each lift's year-to-date change ----
   const [carouselOpen, setCarouselOpen] = useState(false);
@@ -3049,11 +3129,11 @@ export default function Home() {
     const items = [];
     Object.entries(entriesByExerciseStrength).forEach(([name, list]) => {
       const ser = buildExSeries(list, from, today);
-      if (ser) items.push({ name, pct: ser.pct, e1rm: ser.e1rmNow, last: list[0].date });
+      if (ser) items.push({ name, pct: ser.pct, e1rm: ser.e1rmNow, last: list[0].date, reps: strictBwNames.has(name) ? ser.latest.reps : null });
     });
     items.sort((a, b) => (a.last < b.last ? 1 : -1));
     return items.slice(0, 12);
-  }, [entriesByExerciseStrength]);
+  }, [entriesByExerciseStrength, strictBwNames]);
   const allLiftsYtd = useMemo(() => {
     const rows = portfolioSeries.rows;
     if (rows.length < 2) return null;
@@ -3168,7 +3248,7 @@ export default function Home() {
     <DotField />
     <div className="wrap">
       <div className="status-fade" aria-hidden="true" />
-      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><IconGear size={22} /></button></div>
+      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><DotIcon rows={DOT_GEAR} color="currentColor" size={30} /></button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
       {pendingSync && !saveError && <div className="sync-note">Offline or saving. Your changes are kept on this phone and sync automatically.</div>}
@@ -3194,7 +3274,7 @@ export default function Home() {
               {carouselItems.map((it) => (
                 <button key={it.name} type="button" className="carousel-card" tabIndex={carouselOpen ? 0 : -1} onClick={() => openExercise(it.name, it.last, true)}>
                   <span className="cc-name">{tickerOf(it.name)}</span>
-                  <span className="cc-val">{W(it.e1rm)} est. max</span>
+                  <span className="cc-val">{it.reps !== null ? `${it.reps} reps` : `${W(it.e1rm)} est. max`}</span>
                   <span className="cc-pct" style={{ color: it.pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{it.pct >= 0 ? "▲" : "▼"} {Math.abs(it.pct).toFixed(1)}%</span>
                 </button>
               ))}
@@ -3211,7 +3291,7 @@ export default function Home() {
                     ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} intro={introOn} />
                     : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
-                  {!scrubPoint && <span className="plain-line">{`Your strength is ${up ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% ${portfolioRange === "all" ? "all time" : "over " + (RANGE_WORDS[portfolioRange] || "this range")}.`}</span>}
+                  <span className="plain-line" style={scrubPoint ? { visibility: "hidden" } : undefined}>{`Your strength is ${up ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% ${portfolioRange === "all" ? "all time" : portfolioRange === "ytd" ? "year to date" : "over " + (RANGE_WORDS[portfolioRange] || "this range")}.`}</span>
                 </>
               );
             })()}
@@ -3248,7 +3328,13 @@ export default function Home() {
             ))}
           </div>}
 
-          <button className="log-set-row" onClick={() => scrollToSection("home")}>
+          <button className="log-set-row" onClick={() => {
+            // Start the due day: fill in the exercise to open with. Mid-workout (a set in the last 2 hours) it just scrolls down.
+            const midWorkout = !!latestToday && Date.now() - latestToday.t < SESSION_GAP_MS;
+            const target = dueWorkout || dayStats.slice().sort((a, b) => b.days - a.days)[0];
+            if (!midWorkout && target) startDay(target.workout.id);
+            scrollToSection("home");
+          }}>
             <span>Log a set</span>
             <span className="lsr-due">{dueWorkout ? `${dueWorkout.workout.name} is due · ${dueWorkout.days === Infinity ? "never done" : dueWorkout.days === 1 ? "1 day" : `${dueWorkout.days} days`}` : ""} ›</span>
           </button>
@@ -3326,12 +3412,13 @@ export default function Home() {
             )}
 
             {recExercise && (() => {
-              const st = exStats(entriesByExerciseStrength[recExercise] || [], "0000-01-01", "9999-12-31");
+              const recStrict = strictBwNames.has(recExercise);
+              const st = exStats(entriesByExerciseStrength[recExercise] || [], "0000-01-01", "9999-12-31", recStrict);
               if (!st) return null;
               return (
                 <div className="st-grid st-mini">
-                  <div className="st-cell"><div className="st-label">e5RM</div><div className="st-val">{W(st.e5rm)}</div></div>
-                  <div className="st-cell"><div className="st-label">Est. max</div><div className="st-val">{W(st.e1rm)}</div></div>
+                  <div className="st-cell"><div className="st-label">{recStrict ? "Avg reps" : "e5RM"}</div><div className="st-val">{recStrict ? st.e5rm : W(st.e5rm)}</div></div>
+                  <div className="st-cell"><div className="st-label">{recStrict ? "Best reps" : "Est. max"}</div><div className="st-val">{recStrict ? st.e1rm : W(st.e1rm)}</div></div>
                   <div className="st-cell"><div className="st-label">Last set</div><div className="st-val">{st.lastSet.bw ? setWt(st.lastSet, W, unit).replace(` ${unit}`, "") : W(st.lastSet.weight)} × {st.lastSet.reps > 0 ? st.lastSet.reps : 0}</div></div>
                 </div>
               );
@@ -3365,7 +3452,6 @@ export default function Home() {
                   </div>
                   <div className="rec-last">{recommendation.fromManual ? "Your entry" : `Last ${fmtDate(recommendation.lastSessionDate)}`}<br />{bwNames.has(recExercise) ? bwLabel(W(recommendation.lastTop.weight), (v) => v, "").trim() : W(recommendation.lastTop.weight)} × {recommendation.lastTop.reps}</div>
                 </div>
-                <div className="rec-note">{cvText(recommendation.note)}</div>
                 <div className="today-list" style={{ marginTop: 8 }}>
                   {recommendation.rows.map((r) => (
                     <div key={r.set} className={"today-item" + (r.set === 1 ? " top-set" : " sub-set")} style={{ padding: "8px 12px" }}>
@@ -3636,7 +3722,7 @@ export default function Home() {
 
       {overview && (
         <Breakdown
-          initial={overview} onClose={() => setOverview(null)} onOpenExercise={(name, r) => openExercise(name, todayISO(), r === "ytd", r)} strengthEntries={strengthEntries} workouts={workouts} exercises={exercises} unit={unit} W={W}
+          initial={overview} onClose={() => setOverview(null)} onOpenExercise={(name, r) => openExercise(name, todayISO(), r === "ytd", r)} strengthEntries={strengthEntries} strictBwNames={strictBwNames} workouts={workouts} exercises={exercises} unit={unit} W={W}
           h={{ fmtDate, fmtDateFull, fmtNum, shiftDate, weekStartISO, todayISO, rangeCutoffISO, RANGE_PRESETS, setWt }}
         />
       )}
@@ -3688,8 +3774,8 @@ export default function Home() {
               return (
                 <div className="stats-block">
                   <div className="st-grid">
-                    {xData.bw && xData.bw.repsMode ? cell("Best reps", xStats.e1rm) : cell("Est. max", W(xStats.e1rm))}
-                    {xData.bw && xData.bw.repsMode ? cell("Avg reps", xStats.e5rm) : cell("e5RM", W(xStats.e5rm))}
+                    {xData.bw && xData.bw.repsMode ? cell("Best reps", xStats.e1rm) : xStats.strictReps ? cell("Best reps", xStats.bestReps) : cell("Est. max", W(xStats.e1rm))}
+                    {xData.bw && xData.bw.repsMode ? cell("Avg reps", xStats.e5rm) : xStats.strictReps ? cell("Avg reps", xStats.avgReps) : cell("e5RM", W(xStats.e5rm))}
                     {cell(xRangeOf(xpage) === "all" ? "Change" : RANGE_PRESETS.find((r) => r.key === xRangeOf(xpage)).label, pct === null ? "n/a" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`, pct === null ? null : pct >= 0 ? "var(--gain)" : "var(--loss)")}
                     {xData.bw && xData.bw.repsMode ? cell("Total reps", fmtNum(xStats.reps)) : cell(`Volume (${unit})`, fmtNum(W(xStats.volume)))}
                     {cell("Sessions", xStats.sessions)}
@@ -3851,8 +3937,6 @@ export default function Home() {
               </select>
             </div>
 
-            <div className="label-sm" style={{ marginTop: 16 }}>Comparisons</div>
-            <label className="toggle-row"><span>Playful one-liners (jokes with the comparisons)</span><input type="checkbox" role="switch" className="ios-switch" checked={!!settings.playful} onChange={(e) => updateSettings({ playful: e.target.checked })} /></label>
             <div className="label-sm" style={{ marginTop: 16 }}>Sounds &amp; vibration</div>
             <label className="toggle-row"><span>Sounds (log a set, rest timer)</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.sound} onChange={(e) => updateSettings({ sound: e.target.checked })} /></label>
             {canVibrate && <label className="toggle-row"><span>Vibration</span><input type="checkbox" role="switch" className="ios-switch" checked={settings.vibe} onChange={(e) => updateSettings({ vibe: e.target.checked })} /></label>}
