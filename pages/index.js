@@ -34,7 +34,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
-const BUILD_TAG = "Build 70 · Nov 22";
+const BUILD_TAG = "Build 71 · Nov 22";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -424,7 +424,7 @@ function DotNum({ text, color, pitch = 6, intro = false, label }) {
 
 // The app title, pulled down from the top of Overall. Anchored to the bottom, so a small pull shows the
 // bottom of the letters and a full pull shows all of them.
-function DotTitle({ text, height, dragging, progress = 1 }) {
+function DotTitle({ text, height, dragging, progress = 1, gta = false }) {
   const ref = useRef(null);
   const wrapRef = useRef(null);
   const shown = useRef(0);
@@ -471,6 +471,7 @@ function DotTitle({ text, height, dragging, progress = 1 }) {
   return (
     <div ref={wrapRef} className={"title-reveal" + (dragging ? " dragging" : "")} style={{ height }} aria-hidden="true">
       <canvas ref={ref} />
+      {gta && <div className="gta-title">{text}</div>}
     </div>
   );
 }
@@ -969,7 +970,7 @@ const HONEY_COLORS = [
   "#ff4d4d", "#ff8a5c", "#ffd24d", "#c4e86b", "#38d9a9", "#66d9e8", "#4dabf7", "#8aa0ff", "#da77f2", "#f783ac", "#ff9aa2", "#ff6ec7",
 ];
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
-const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "ibm-plex-sans", fontV: 2, fontNum: "jetbrains-mono", glass: true, gl: "ios", unit: "lbs", dotNums: true, bodyWeight: 0 };
+const DEFAULT_SETTINGS = { mode: "dark", accent: "#ff6600", sound: true, vibe: true, ai: true, goal: "strength", fontText: "ibm-plex-sans", fontV: 2, fontNum: "jetbrains-mono", glass: true, gl: "ios", unit: "lbs", dotNums: true, look: "dots", bodyWeight: 0 };
 const TEXT_FONTS = [["space-grotesk", "Space Grotesk"], ["ibm-plex-sans", "IBM Plex Sans"], ["barlow", "Barlow"], ["inter", "Inter"], ["sf-pro", "SF Pro (system)"]];
 const NUM_FONTS = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["sf-mono", "SF Mono (system)"], ["space-mono", "Space Mono"], ["same", "Same as text font"]];
 const GOALS = [
@@ -1089,7 +1090,7 @@ function digestBasic(stats) {
 function DotIcon({ rows, color, size = 26 }) {
   const w = Math.max(...rows.map((r) => r.length)), h = rows.length;
   const dots = [];
-  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === "#") dots.push(<circle key={x + "-" + y} cx={x + 0.5} cy={y + 0.5} r="0.4" />); });
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === "#") dots.push(<g key={x + "-" + y}><circle className="dp" cx={x + 0.5} cy={y + 0.5} r="0.4" /><rect className="px" x={x} y={y} width="1.02" height="1.02" /></g>); });
   return <svg width={size} height={size * h / w} viewBox={`0 0 ${w} ${h}`} fill={color} aria-hidden="true">{dots}</svg>;
 }
 const DOT_PLUS = ["..#..","..#..","#####","..#..","..#.."];
@@ -1824,7 +1825,8 @@ export default function Home() {
       const fv = deriveFonts(settings.fontText, settings.fontNum);
       Object.keys(fv).forEach((k) => root.style.setProperty(k, fv[k]));
       if (settings.glass) root.setAttribute("data-nav", "glass"); else root.removeAttribute("data-nav");
-      if (settings.dotNums !== false) root.setAttribute("data-dotnums", "on"); else root.removeAttribute("data-dotnums");
+      if (settings.look === "gta") root.setAttribute("data-look", "gta"); else root.removeAttribute("data-look");
+      if ((settings.dotNums !== false && settings.look !== "gta") && settings.look !== "gta") root.setAttribute("data-dotnums", "on"); else root.removeAttribute("data-dotnums");
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute("content", t.themeColor);
       // iOS home-screen apps read this at launch: dark text on a light bar when the app is light.
@@ -1834,7 +1836,7 @@ export default function Home() {
     apply();
     if (settings.mode === "system" && mq && mq.addEventListener) { mq.addEventListener("change", apply); return () => mq.removeEventListener("change", apply); }
     return undefined;
-  }, [settings.mode, settings.accent, settings.fontText, settings.fontNum, settings.glass, settings.gl, settings.dotNums]);
+  }, [settings.mode, settings.accent, settings.fontText, settings.fontNum, settings.glass, settings.gl, settings.dotNums, settings.look]);
   const updateSettings = (patch) => setSettings((cur) => {
     const next = { ...cur, ...patch };
     try { localStorage.setItem("hooksSettings", JSON.stringify(next)); } catch (e) { /* ignore */ }
@@ -3248,7 +3250,9 @@ export default function Home() {
     <DotField />
     <div className="wrap">
       <div className="status-fade" aria-hidden="true" />
-      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings"><DotIcon rows={DOT_GEAR} color="currentColor" size={30} /></button></div>
+      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">{settings.look === "gta"
+          ? <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M10.3 2h3.4l.5 2.6c.6.2 1.2.5 1.7.9l2.5-.9 1.7 2.9-2 1.7c.1.6.1 1.2 0 1.8l2 1.7-1.7 2.9-2.5-.9c-.5.4-1.1.7-1.7.9l-.5 2.6h-3.4l-.5-2.6c-.6-.2-1.2-.5-1.7-.9l-2.5.9-1.7-2.9 2-1.7a6 6 0 010-1.8l-2-1.7 1.7-2.9 2.5.9c.5-.4 1.1-.7 1.7-.9zM12 9a3 3 0 100 6 3 3 0 000-6z" /></svg>
+          : <DotIcon rows={DOT_GEAR} color="currentColor" size={30} />}</button></div>
 
       {saveError && <div className="warn">{saveError}</div>}
       {pendingSync && !saveError && <div className="sync-note">Offline or saving. Your changes are kept on this phone and sync automatically.</div>}
@@ -3259,7 +3263,7 @@ export default function Home() {
         <>
         {/* ---------------- OVERALL ---------------- */}
         <div ref={(el) => (sectionRefs.current.portfolio = el)} className="overall-screen" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd} onTouchCancel={onPullEnd}>
-          <DotTitle text={APP_TITLE} height={titlePull} dragging={titleDrag} progress={titlePull / TITLE_MAX} />
+          <DotTitle gta={settings.look === "gta"} text={APP_TITLE} height={titlePull} dragging={titleDrag} progress={titlePull / TITLE_MAX} />
           <button type="button" className={"pull-cue" + (carouselOpen ? " open" : "")} onClick={() => setCarouselOpen((v) => !v)} aria-label={carouselOpen ? "Hide exercises" : "Show exercises"}>
             <span className="pc-text">Exercises</span><svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 6 7-6" /></svg>
           </button>
@@ -3287,7 +3291,7 @@ export default function Home() {
               const rangeLabel = RANGE_PRESETS.find((r) => r.key === portfolioRange)?.label;
               return (
                 <>
-                  {settings.dotNums !== false
+                  {(settings.dotNums !== false && settings.look !== "gta")
                     ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} intro={introOn} />
                     : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                   <span className="index-meta"><span className="cap">{scrubPoint ? scrubPoint.label : rangeLabel}</span></span>
@@ -3680,14 +3684,14 @@ export default function Home() {
           </div>
           <div className="card">
             <CardHead title="Weekly training volume" />
-            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => setOverview({ kind: "volume", range: "3m" })} dots={settings.dotNums !== false} />
+            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => setOverview({ kind: "volume", range: "3m" })} dots={(settings.dotNums !== false && settings.look !== "gta")} />
             <button type="button" className="detail-link" onClick={() => setOverview({ kind: "volume", range: "3m" })}>Last 10 weeks · Details ›</button>
             {(() => { const cur = weeklyVolume.find((w) => w.isCurrent); if (!cur || !(cur.volume > 0)) return null; const t = compareLine(cur.volume, "week" + cur.volume); return t ? <div className="compare-line">This week: {fmtNum(W(cur.volume))} {unit} moved. {t}</div> : null; })()}
             <InfoFoot title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. Tap the chart to split it by category and exercise." />
           </div>
           <div className="card">
             <CardHead title="Training consistency" />
-            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={(d) => setOverview({ kind: "days", range: "3m", date: d || null })} dots={settings.dotNums !== false} />
+            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={(d) => setOverview({ kind: "days", range: "3m", date: d || null })} dots={(settings.dotNums !== false && settings.look !== "gta")} />
             <button type="button" className="detail-link" onClick={() => setOverview({ kind: "days", range: "3m" })}>Last 10 weeks · Details ›</button>
             <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). A lit square means you trained that day. Tap a day to see what you did." />
             <div className="cons-stats">
@@ -3740,7 +3744,7 @@ export default function Home() {
                 const up = pct >= 0;
                 return (
                   <>
-                    {settings.dotNums !== false
+                    {(settings.dotNums !== false && settings.look !== "gta")
                       ? <DotNum text={`${up ? "+" : "-"}${Math.abs(pct).toFixed(1)}%`} color={up ? "var(--gain)" : "var(--loss)"} />
                       : <span className="index-num" style={{ color: up ? "var(--gain)" : "var(--loss)" }}>{up ? "+" : "−"}{Math.abs(pct).toFixed(1)}%</span>}
                     <span className="index-meta"><span className="cap">{xScrub ? xScrub.label : xRangeOf(xpage) === "all" ? "Since first log" : RANGE_PRESETS.find((r) => r.key === xRangeOf(xpage)).label}</span></span>
@@ -3922,6 +3926,12 @@ export default function Home() {
             <div className="pills">
               {[["dark", "Dark"], ["light", "Light"], ["system", "Match phone"]].map(([k, label]) => (
                 <button key={k} className={"pill" + (settings.mode === k ? " active" : "")} onClick={() => updateSettings({ mode: k })}>{label}</button>
+              ))}
+            </div>
+            <div className="label-sm" style={{ marginTop: 16 }}>Style</div>
+            <div className="pills">
+              {[["dots", "Dot matrix"], ["gta", "GTA"]].map(([k, label]) => (
+                <button key={k} className={"pill" + ((settings.look || "dots") === k ? " active" : "")} onClick={() => updateSettings({ look: k })}>{label}</button>
               ))}
             </div>
 

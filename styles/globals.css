@@ -792,3 +792,26 @@ html.bd-open,html.bd-open body{overflow:hidden !important;}
 
 /* Build 68: selected-range dots are whole and evenly spread across the label */
 [data-dotnums="on"] .pills.range-tabs .pill.active .tab-l::after,[data-dotnums="on"] .pills-sub .pill-sm.active .tab-l::after{background:radial-gradient(circle at 2.5px 2px,var(--accent) 1.5px,transparent 1.9px) 0 0/5px 4px space no-repeat;}
+
+/* ---- Build 71: GTA style (Style: GTA in Settings). Bowlby One stands in for Pricedown. ---- */
+svg .px{display:none;}
+[data-look="gta"] *{font-synthesis:none;}
+[data-look="gta"] svg .dp{display:none;}
+[data-look="gta"] svg .px{display:inline;}
+[data-look="gta"]{--font-text:"IBM Plex Sans",-apple-system,sans-serif !important;--font-num:"Bowlby One","IBM Plex Sans",sans-serif !important;--gain:#7ccc4f;--loss:#ff3b30;}
+[data-look="gta"][data-theme="light"]{--gain:#2e7d14;--loss:#c0201a;}
+[data-look="gta"] .title-reveal canvas{display:none;}
+[data-look="gta"] .title-reveal{display:flex;align-items:center;justify-content:center;overflow:hidden;}
+[data-look="gta"] .gta-title{font-family:"Bowlby One",sans-serif;font-size:clamp(26px,9vw,40px);letter-spacing:.01em;color:#fff;line-height:1;white-space:nowrap;text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000,0 3px 0 #000,3px 4px 0 var(--accent);opacity:var(--tp,1);}
+[data-theme="light"][data-look="gta"] .gta-title{color:#111;text-shadow:-2px -2px 0 #fff,2px -2px 0 #fff,-2px 2px 0 #fff,2px 2px 0 #fff,3px 4px 0 var(--accent);}
+[data-look="gta"] .portfolio-change .index-num{font-family:"Bowlby One",sans-serif;font-weight:400;letter-spacing:0;text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000,0 4px 0 #000;}
+[data-theme="light"][data-look="gta"] .portfolio-change .index-num{text-shadow:none;}
+[data-look="gta"] .st-val,[data-look="gta"] .rec-main,[data-look="gta"] .cc-val,[data-look="gta"] .cc-pct,[data-look="gta"] .hist-nums,[data-look="gta"] .xp-num{font-family:"Bowlby One",sans-serif;font-weight:400;letter-spacing:0;}
+[data-look="gta"] .st-val,[data-look="gta"] .rec-main{font-size:.9375rem;}
+[data-look="gta"] .label-sm,[data-look="gta"] .eyebrow,[data-look="gta"] .index-tag,[data-look="gta"] .pill,[data-look="gta"] .sheet-title{font-family:"Bowlby One",sans-serif;font-weight:400;letter-spacing:.03em;text-transform:uppercase;font-size:.75rem;}
+[data-look="gta"] .sheet-title{font-size:1.125rem;}
+[data-look="gta"] .bottom-nav-item span,[data-look="gta"] .feed-fab span{font-family:"Bowlby One",sans-serif !important;font-weight:400;font-size:10px;letter-spacing:.02em;text-transform:uppercase;}
+[data-look="gta"] .step-btn,[data-look="gta"] .date-pill,[data-look="gta"] .week-tile,[data-look="gta"] .ma-readout,[data-look="gta"] .cap{font-family:"Bowlby One",sans-serif;font-weight:400;}
+[data-look="gta"] .plain-line,[data-look="gta"] .helper,[data-look="gta"] .info-body,[data-look="gta"] .bd-note,[data-look="gta"] .bd-meta,[data-look="gta"] .bd-story,[data-look="gta"] .toggle-row span{font-family:"IBM Plex Sans",-apple-system,sans-serif;font-weight:600;}
+[data-look="gta"] svg text{font-family:"IBM Plex Sans",-apple-system,sans-serif;font-weight:700;}
+[data-look="gta"] input[type=number],[data-look="gta"] .stepper-row input,[data-look="gta"] .row3 input{font-family:"Bowlby One",sans-serif;font-weight:400;}
