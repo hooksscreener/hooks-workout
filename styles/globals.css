@@ -815,3 +815,13 @@ svg .px{display:none;}
 [data-look="gta"] .plain-line,[data-look="gta"] .helper,[data-look="gta"] .info-body,[data-look="gta"] .bd-note,[data-look="gta"] .bd-meta,[data-look="gta"] .bd-story,[data-look="gta"] .toggle-row span{font-family:"IBM Plex Sans",-apple-system,sans-serif;font-weight:600;}
 [data-look="gta"] svg text{font-family:"IBM Plex Sans",-apple-system,sans-serif;font-weight:700;}
 [data-look="gta"] input[type=number],[data-look="gta"] .stepper-row input,[data-look="gta"] .row3 input{font-family:"Bowlby One",sans-serif;font-weight:400;}
+/* Default 2: the empty weight and reps zeros are the same faint zero. */
+[data-look="gta"] .gta-zero{font-family:"Bowlby One",sans-serif;font-size:1.5rem;line-height:1;opacity:.35;}
+[data-look="gta"] .stepper-row input.is-zero{color:var(--text-secondary);opacity:.35;}
+[data-look="gta"] .cam-btn svg{display:block;}
+
+/* ---- Build 73: Tropical theme (Default 2 only). Colors come from lib/theme.js; this adds the neon lines. ---- */
+[data-palette="tropical"] svg polyline[stroke-linecap="round"]:not([stroke-dasharray]),
+[data-palette="tropical"] svg polyline.pf-line{filter:url(#neonGlow);}
+[data-palette="tropical"] .gta-title{text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000,3px 4px 0 var(--accent),6px 8px 0 #40C8E0;}
+[data-palette="tropical"][data-theme="light"] .gta-title{text-shadow:-2px -2px 0 #fff,2px -2px 0 #fff,-2px 2px 0 #fff,2px 2px 0 #fff,3px 4px 0 var(--accent);}

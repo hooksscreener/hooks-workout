@@ -26,11 +26,21 @@ export default function Document() {
         <meta name="twitter:card" content="summary_large_image" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches,s.gl);var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontV===2?s.fontText:'ibm-plex-sans',s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}try{var sb=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');if(sb){sb.setAttribute('content',t.scheme==='light'?'default':'black-translucent');}var tc=document.querySelector('meta[name="theme-color"]');if(tc){tc.setAttribute('content',t.themeColor);}}catch(e2){}if(s.dotNums!==false){r.setAttribute('data-dotnums','on');}}catch(e){}})();`,
+            __html: `(function(){try{var derive=${deriveTheme.toString()};var fonts=${deriveFonts.toString()};var s=JSON.parse(localStorage.getItem('hooksSettings')||'{}');var t=derive(s.mode||'dark',s.accent||'#ff6600',window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches,s.gl,(s.look==='gta'&&s.theme==='tropical')?'tropical':'');var r=document.documentElement;r.setAttribute('data-theme',t.scheme);for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}var f=fonts(s.fontV===2?s.fontText:'ibm-plex-sans',s.fontNum);for(var k2 in f){r.style.setProperty(k2,f[k2]);}if(s.glass){r.setAttribute('data-nav','glass');}try{var sb=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');if(sb){sb.setAttribute('content',t.scheme==='light'?'default':'black-translucent');}var tc=document.querySelector('meta[name="theme-color"]');if(tc){tc.setAttribute('content',t.themeColor);}}catch(e2){}if(s.look==='gta'){r.setAttribute('data-look','gta');if(s.theme==='tropical'){r.setAttribute('data-palette','tropical');}}else if(s.dotNums!==false){r.setAttribute('data-dotnums','on');}}catch(e){}})();`,
           }}
         />
       </Head>
       <body>
+        {/* Neon glow used by line charts in the Tropical theme (see globals.css). */}
+        <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true" focusable="false">
+          <defs>
+            <filter id="neonGlow" filterUnits="userSpaceOnUse" x="-200" y="-200" width="3000" height="3000" colorInterpolationFilters="sRGB">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b1" />
+              <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b2" />
+              <feMerge><feMergeNode in="b2" /><feMergeNode in="b1" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+          </defs>
+        </svg>
         <Main />
         <NextScript />
       </body>
