@@ -1,6 +1,9 @@
 import { LEGAL_DOCS } from "../lib/legal";
-import Breakdown, { gtaShade } from "../lib/Breakdown";
-import { growthByCategory } from "../lib/analysis";
+import Breakdown, { gtaShade, catHex, exHex } from "../lib/Breakdown";
+import { growthByCategory, makeCatOf } from "../lib/analysis";
+import FeedBackground, { SCENE_IDS, assignCards } from "../lib/FeedBackground";
+import ProfilePage from "../lib/ProfilePage";
+import { ownProfileStats } from "../lib/profileStats";
 import { LegalBody } from "../lib/LegalPage";
 import { useState, useEffect, useMemo, useRef, useLayoutEffect, memo } from "react";
 import { deriveTheme, deriveFonts } from "../lib/theme";
@@ -34,7 +37,7 @@ const MA_OPTIONS = [
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["S","M","T","W","T","F","S"];
 const RANGE_WORDS = { "1m": "the last month", "3m": "the last 3 months", "6m": "the last 6 months", ytd: "this year", "1y": "the last year", all: "all time" };
-const BUILD_TAG = "Build 75 · Nov 25";
+const BUILD_TAG = "Build 79 · Nov 27";
 const MACHINE_BRANDS = ["Hammer Strength", "Life Fitness", "Cybex", "Hoist", "Precor", "Technogym", "Matrix", "Nautilus", "Gym80", "Panatta", "Atlantis", "Body-Solid", "Prime", "Rogue", "Arsenal Strength", "Plate Loaded", "Cable", "Smith Machine"];
 const PASSCODE_KEY = "hooksAppPasscode";
 const CACHE_KEY = "hooksCache";     // last full copy of your data, kept on this phone so the app opens offline
@@ -580,13 +583,16 @@ function DotHeart({ on, size = 3 }) {
   );
 }
 const likeSeed = (id) => 3 + ([...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % 38);
-const EMBLEM = { PR: "PR", Streak: "STREAK", Growth: "GROWTH", Volume: "VOLUME" };
+const EMBLEM = { PR: "PR", Streak: "STREAK", Growth: "GROWTH", Volume: "VOLUME", "225": "225", "315": "315", "405": "405", "1000": "1000 CLUB", "3x BW": "3X BW", "Pull-ups": "PULL-UPS", Dips: "DIPS", "Push-ups": "PUSH-UPS", "225 x8": "225 x 8" };
 
-function FeedPage({ source = mockSocial }) {
+function FeedPage({ source = mockSocial, gta = false }) {
   const [mode, setMode] = useState(FEED_MODES.DISCOVERY); // null = Community Discovery (default)
   const [liked, setLiked] = useState({});
     const toggle = (m) => setMode((cur) => (cur === m ? FEED_MODES.DISCOVERY : m));
   const items = useMemo(() => filterFeed({ ...source, mode }), [source, mode]);
+  // A few of the NPCs get a calling card, picked at random once per session (the profile page reads the same pick).
+  const cards = useMemo(() => assignCards(Object.keys(source.users || {}).filter((id) => id !== "me")), [source]);
+  const [profileId, setProfileId] = useState(null);
   const heading = mode === "friends" ? "Friends only" : mode === "fof" ? "Friends of friends" : "Community";
   return (
     <div className="feedpage" role="region" aria-label="Feed">
@@ -604,13 +610,14 @@ function FeedPage({ source = mockSocial }) {
       {items.length === 0 && <div className="cap" style={{ padding: "var(--s-5) 0" }}>Nothing to show in this view yet.</div>}
       {items.map((it) => {
         const u = source.users[it.authorId] || {};
-        const nm = String(u.name || "Someone"), initial = nm.replace(/^Sample\s+/, "").charAt(0).toUpperCase();
+        const nm = String(u.name || "Someone"), initial = nm.replace(/^(NPC|Sample)\s+/, "").charAt(0).toUpperCase();
         const n = likeSeed(it.id) + (liked[it.id] ? 1 : 0);
         return (
-          <div key={it.id} className="fp-card">
+          <div key={it.id} className={"fp-card" + (gta && cards[it.authorId] ? " has-bg" : "")}>
+            {gta && cards[it.authorId] && <FeedBackground scene={cards[it.authorId]} />}
             <div className="fp-row">
               <div className="fp-main">
-                <div className="fp-who">
+                <div className="fp-who" role="button" tabIndex={0} aria-label={`Open ${nm} profile`} onClick={() => setProfileId(it.authorId)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setProfileId(it.authorId); }}>
                   <span className="fp-avatar" aria-hidden="true">{initial}</span>
                   <span>
                     <span className="fp-name">{nm}{u.isMock && <span className="feed-mock">sample</span>}</span>
@@ -619,20 +626,21 @@ function FeedPage({ source = mockSocial }) {
                 </div>
                 <div className="fp-text">{it.text}</div>
               </div>
-              <div className="fp-emblem" aria-hidden="true"><DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--gain)" pitch={3} /></div>
+              <div className="fp-emblem" aria-hidden="true">{gta ? <span className="gta-emblem">{EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)}</span> : <DotNum text={EMBLEM[it.achievement] || String(it.achievement || "").toUpperCase().slice(0, 6)} color="var(--gain)" pitch={3} />}</div>
             </div>
             <button type="button" className={"fp-like" + (liked[it.id] ? " on" : "")} aria-pressed={!!liked[it.id]} onClick={() => setLiked((l) => ({ ...l, [it.id]: !l[it.id] }))}>
-              <DotHeart on={!!liked[it.id]} size={3} />
+              {gta ? <svg width="16" height="15" viewBox="0 0 24 22" aria-hidden="true"><path d="M12 21C5 15 1.5 11.5 1.5 7.2 1.5 4 3.9 1.8 6.8 1.8c2 0 3.9 1.1 5.2 3 1.3-1.9 3.2-3 5.2-3 2.9 0 5.3 2.2 5.3 5.4 0 4.3-3.5 7.8-10.5 13.8z" fill={liked[it.id] ? "var(--loss)" : "none"} stroke={liked[it.id] ? "var(--loss)" : "var(--text-secondary)"} strokeWidth="2" /></svg> : <DotHeart on={!!liked[it.id]} size={3} />}
               <span>{n}</span>
             </button>
           </div>
         );
       })}
+      {profileId && source.users[profileId] && <ProfilePage name={source.users[profileId].name} subtitle="NPC · sample profile" scene={cards[profileId] || null} stats={source.users[profileId].stats} onClose={() => setProfileId(null)} />}
     </div>
   );
 }
 
-function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
+function SvgChart({ rows, series, mode, metric, unit = "lbs", gta = false }) {
   const [activeIdx, setActiveIdx] = useState(null);
   const svgRef = useRef(null);
   const W = 340, H = 210, padL = 38, padR = 14, padT = 10, padB = 24;
@@ -710,7 +718,8 @@ function SvgChart({ rows, series, mode, metric, unit = "lbs" }) {
         const pts = [];
         rows.forEach((r, i) => { if (r[s] !== undefined) pts.push(`${x(i)},${y(r[s])}`); });
         return <g key={s}>
-          {series.length === 1 && pts.length > 1 && <AreaDots pts={pts} baseY={H - padB} color={trendColor === "var(--loss)" ? "var(--loss)" : "var(--gain)"} />}
+          {series.length === 1 && pts.length > 1 && !gta && <AreaDots pts={pts} baseY={H - padB} color={trendColor === "var(--loss)" ? "var(--loss)" : "var(--gain)"} />}
+          {series.length === 1 && pts.length > 1 && gta && (() => { const gc = trendColor === "var(--loss)" ? "var(--loss)" : "var(--gain)"; const lt = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light"; return <><defs><linearGradient id="svgSmooth" gradientUnits="userSpaceOnUse" x1="0" y1={padT} x2="0" y2={H - padB}><stop offset="0%" stopColor={gc} stopOpacity={lt ? 0.5 : 0.4} /><stop offset="70%" stopColor={gc} stopOpacity={lt ? 0.2 : 0.13} /><stop offset="100%" stopColor={gc} stopOpacity="0" /></linearGradient></defs><polygon points={`${pts[0].split(",")[0]},${H - padB} ${pts.join(" ")} ${pts[pts.length - 1].split(",")[0]},${H - padB}`} fill="url(#svgSmooth)" stroke="none" /></>; })()}
           <polyline points={pts.join(" ")} fill="none" stroke={colorOf(si)} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         </g>;
       })}
@@ -1391,7 +1400,7 @@ function PortfolioChart({ rows, maRows, color, onScrub, intro = false, smooth = 
   );
 }
 
-function RadarChart({ data, rangeLabel, onTap, gta = false }) {
+function RadarChart({ data, rangeLabel, onTap, gta = false, light = false }) {
   // Horizontal bars, one per muscle group: green up, red down, from a zero line. Label, bar and value sit close together and the group is centered in the card.
   const W = 320, rowH = 44, padT = 4, labelW = 44, valW = 46, gap = 8;
   const H = data.length * rowH + padT * 2;
@@ -1415,7 +1424,9 @@ function RadarChart({ data, rangeLabel, onTap, gta = false }) {
         return (
           <g key={d.label} onClick={(ev) => { ev.stopPropagation(); if (onTap) onTap(d.id); }}>
             <text x={labelW} y={cy} fontSize="13" fill="var(--text-primary)" textAnchor="end" dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 600 }}>{d.label}</text>
-            {d.hasData && <rect x={x1} y={by} width={w} height={24} rx={gta ? 4 : 0} style={gta && up ? { fill: gtaShade(0.3) } : undefined} fill={gta ? (up ? "var(--gain)" : "var(--loss)") : up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
+            {d.hasData && gta && up && d.segs && d.segs.length > 0
+              ? (() => { let a = x1; return d.segs.map((sg, si) => { const last = si === d.segs.length - 1; const sw = last ? x1 + w - a : Math.round((sg.frac * w) / 4) * 4; const rx0 = a; a += sw; return sw > 0 ? <rect key={sg.name} x={rx0} y={by} width={sw} height={24} rx={4} fill={sg.color} stroke="var(--bg)" strokeWidth="1.5" /> : null; }); })()
+              : d.hasData && <rect x={x1} y={by} width={w} height={24} rx={gta ? 4 : 0} fill={gta ? (up ? "var(--gain)" : "var(--loss)") : up ? "url(#barDotsGain)" : "url(#barDotsLoss)"} />}
             <text x={up ? endX + 8 : x1 - 8} y={cy} fontSize="14" fill={d.hasData ? col : "var(--text-secondary)"} textAnchor={up ? "start" : "end"} dominantBaseline="central" style={{ fontFamily: "'IBM Plex Sans',-apple-system,sans-serif", fontWeight: 700 }}>{d.hasData ? `${up ? "+" : ""}${Math.round(d.value * 10) / 10}%` : "no data"}</text>
           </g>
         );
@@ -1462,7 +1473,7 @@ function useSvgScale(svgRef) {
 }
 const MAIN_DOT_GAP = 3.2;
 
-function VolumeBarChart({ weeks, onTapBar, dots, gta = false }) {
+function VolumeBarChart({ weeks, onTapBar, dots, gta = false, catIds = [], catColor = () => "var(--gain)" }) {
   const W = 342, H = 190, padL = 34, padR = 8, padT = 10, padB = 22;
   const svgRef = useRef(null);
   const k = useSvgScale(svgRef);
@@ -1483,7 +1494,9 @@ function VolumeBarChart({ weeks, onTapBar, dots, gta = false }) {
           <rect x={x - 2} y={padT} width={bw + 4} height={H - padT - padB} fill="transparent" />
           {dots
             ? (() => { const pt = dotGap, nc = Math.max(3, Math.floor(bw / pt) + 1), nr = Math.floor(h / pt), x0 = x + (bw - (nc - 1) * pt) / 2; const out = []; for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) out.push(<circle key={r + "-" + c} cx={x0 + c * pt} cy={H - padB - pt / 2 - r * pt} r={dotR} fill="var(--gain)" fillOpacity={w.isCurrent ? 1 : 0.72} />); if (!nr) out.push(<circle key="z" cx={x0 + (nc - 1) * pt / 2} cy={H - padB - 2} r={dotR} fill="var(--border)" />); return out; })()
-            : <rect x={x} y={H - padB - h} width={bw} height={h} rx={gta ? 4 : 3} style={gta ? { fill: gtaShade(w.volume / max) } : undefined} fill="var(--gain)" fillOpacity={gta ? 1 : w.isCurrent ? 1 : 0.45} />}
+            : gta && w.byCat && w.volume > 0
+              ? (() => { let yy = H - padB; return catIds.map((id) => { const v = w.byCat[id] || 0; if (!v) return null; const hh = Math.max(3, (v / max) * (H - padT - padB)); yy -= hh; return <rect key={id} x={x} y={yy} width={bw} height={hh} rx={3} fill={catColor(id)} stroke="var(--bg)" strokeWidth="1" />; }); })()
+              : <rect x={x} y={H - padB - h} width={bw} height={h} rx={gta ? 4 : 3} fill="var(--gain)" fillOpacity={gta ? 1 : w.isCurrent ? 1 : 0.45} />}
           <text x={x + bw / 2} y={H - 6} fontSize="8" fill="var(--text-primary)" textAnchor="middle">{w.label}</text>
         </g>;
       })}
@@ -1491,7 +1504,7 @@ function VolumeBarChart({ weeks, onTapBar, dots, gta = false }) {
   );
 }
 
-function ConsistencyHeatmap({ weeks, onTap, dots, gta = false }) {
+function ConsistencyHeatmap({ weeks, onTap, dots, gta = false, catColor = () => "var(--gain)" }) {
   const tapRef = useRef(null);
   // weeks: [[{date, count, future}, ...7 days Monday to Sunday], ...]
   const cell = 20, gap = 4;
@@ -1502,7 +1515,8 @@ function ConsistencyHeatmap({ weeks, onTap, dots, gta = false }) {
   const W = weeks.length * (cell + gap) + labelW;
   const H = 7 * (cell + gap);
   const maxVol = Math.max(1, ...weeks.flat().map((d) => d.volume || 0));
-  const colorFor = (count, day) => (gta ? gtaShade((day.volume || 0) / maxVol) : "var(--gain)");
+  const colorFor = (count, day) => (gta ? catColor(day.cat) : "var(--gain)");
+  const gtaOp = (day) => 0.4 + 0.6 * Math.min(1, (day.volume || 0) / maxVol);
   const opFor = (count) => (count === 0 ? 0 : count === 1 ? 0.3 : count === 2 ? 0.6 : 1);
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H + 4}`} style={{ width: "100%", height: "auto", display: "block", cursor: "pointer" }} onClick={(ev) => {
@@ -1521,7 +1535,7 @@ function ConsistencyHeatmap({ weeks, onTap, dots, gta = false }) {
         }
         return <g key={`${wi}-${di}`}>{out}</g>;
       })) : weeks.map((week, wi) => week.map((day, di) => (
-        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" style={!day.future && day.count > 0 ? { fill: colorFor(day.count, day) } : undefined} fill={day.future ? "none" : day.count === 0 ? "var(--border)" : "var(--gain)"} fillOpacity={1} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
+        <rect key={`${wi}-${di}`} x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx="4" style={!day.future && day.count > 0 ? { fill: colorFor(day.count, day) } : undefined} fill={day.future ? "none" : day.count === 0 ? "var(--border)" : "var(--gain)"} fillOpacity={gta && !day.future && day.count > 0 ? gtaOp(day) : 1} stroke={day.future ? "var(--border)" : "none"} strokeDasharray={day.future ? "2,3" : undefined} />
       )))}
       {DAYS.map((d, di) => <text key={d} x={W - labelW + 6} y={di * (cell + gap) + cell / 2 + 4} fontSize="11" fill="var(--text-primary)">{d}</text>)}
     </svg>
@@ -1704,6 +1718,7 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsLight, setSettingsLight] = useState(false);
   const [legalDoc, setLegalDoc] = useState(null);
   const [hexDraft, setHexDraft] = useState("");
   const [me, setMe] = useState(null);                       // { role: "owner" | "tester", name }
@@ -1853,6 +1868,7 @@ export default function Home() {
       const t = deriveTheme(settings.mode, settings.accent, mq ? mq.matches : false, settings.gl, settings.look === "gta" && settings.theme === "tropical" ? "tropical" : "");
       const root = document.documentElement;
       root.setAttribute("data-theme", t.scheme);
+      setSettingsLight(t.scheme === "light");
       Object.keys(t.vars).forEach((k) => root.style.setProperty(k, t.vars[k]));
       const fv = deriveFonts(settings.fontText, settings.fontNum);
       Object.keys(fv).forEach((k) => root.style.setProperty(k, fv[k]));
@@ -2602,10 +2618,22 @@ export default function Home() {
 
   // Same numbers the Strength page shows for "All time", so the chart and its breakdown always agree.
   const radarData = useMemo(
-    () => growthByCategory({ workouts, exercises, entries: strengthEntries, start: "0000-01-01", end: "9999-12-31" }).map((c) => ({ id: c.id, label: c.label, value: c.value, hasData: c.hasData })),
-    [workouts, exercises, strengthEntries]
+    () => growthByCategory({ workouts, exercises, entries: strengthEntries, start: "0000-01-01", end: "9999-12-31" }).map((c) => {
+      const items = c.items.filter((i) => i.pct !== null && i.pct > 0);
+      const tot = items.reduce((t, i) => t + i.contrib, 0) || 1;
+      const merged = [];
+      let rest = 0;
+      items.forEach((i, rk) => { if (rk < 7) merged.push({ name: i.name, frac: i.contrib / tot, color: exHex(rk, settingsLight) }); else rest += i.contrib; });
+      if (rest > 0) merged.push({ name: "__other", frac: rest / tot, color: exHex(99, settingsLight) });
+      return { id: c.id, label: c.label, value: c.value, hasData: c.hasData, segs: merged };
+    }),
+    [workouts, exercises, strengthEntries, settingsLight]
   );
 
+  const myProfileStats = useMemo(() => ownProfileStats({ entries: strengthEntries, workouts, exercises, strictBwNames, W, unit }), [strengthEntries, workouts, exercises, strictBwNames, unit]);
+  const catOfAll = useMemo(() => makeCatOf(workouts, exercises), [workouts, exercises]);
+  const catIdsAll = useMemo(() => [...workouts.map((w) => w.id), "other"], [workouts]);
+  const catColorFn = (id) => catHex(workouts, id, settingsLight);
   // Calendar weeks, Monday to Sunday, warm-ups excluded. The current week is "so far".
   const weeklyVolume = useMemo(() => {
     const numWeeks = 10;
@@ -2614,12 +2642,13 @@ export default function Home() {
     for (let i = numWeeks - 1; i >= 0; i--) {
       const start = shiftDate(thisWeek, -i * 7);
       const end = shiftDate(start, 6);
-      const vol = strengthEntries.filter((e) => e.date >= start && e.date <= end).reduce((sum, e) => sum + e.weight * (e.sets || 1) * e.reps, 0);
+      const byCat = {};
+      const vol = strengthEntries.filter((e) => e.date >= start && e.date <= end).reduce((sum, e) => { const v = e.weight * (e.sets || 1) * e.reps; const c = catOfAll(e); byCat[c] = (byCat[c] || 0) + v; return sum + v; }, 0);
       const [, m, d] = start.split("-");
-      weeks.push({ label: `${+m}/${+d}`, volume: vol, start, end, isCurrent: i === 0 });
+      weeks.push({ label: `${+m}/${+d}`, volume: vol, start, end, isCurrent: i === 0, byCat });
     }
     return weeks;
-  }, [strengthEntries]);
+  }, [strengthEntries, catOfAll]);
 
   const heatmapWeeks = useMemo(() => {
     const numWeeks = 10;
@@ -2627,18 +2656,20 @@ export default function Home() {
     const thisWeek = weekStartISO(today);
     const countByDate = {};
     const volByDate = {};
-    strengthEntries.forEach((e) => { countByDate[e.date] = (countByDate[e.date] || 0) + 1; volByDate[e.date] = (volByDate[e.date] || 0) + e.weight * (e.sets || 1) * e.reps; });
+    const catVol = {};
+    strengthEntries.forEach((e) => { const v = e.weight * (e.sets || 1) * e.reps; countByDate[e.date] = (countByDate[e.date] || 0) + 1; volByDate[e.date] = (volByDate[e.date] || 0) + v; const c = catOfAll(e); (catVol[e.date] = catVol[e.date] || {})[c] = ((catVol[e.date] || {})[c] || 0) + v; });
+    const domOf = (date) => { const m = catVol[date]; return m ? Object.keys(m).sort((a, b) => m[b] - m[a])[0] : null; };
     const weeks = [];
     for (let w = numWeeks - 1; w >= 0; w--) {
       const week = [];
       for (let d = 0; d < 7; d++) {
         const date = shiftDate(thisWeek, -w * 7 + d);
-        week.push({ date, count: Math.min(countByDate[date] || 0, 3), volume: volByDate[date] || 0, future: date > today });
+        week.push({ date, count: Math.min(countByDate[date] || 0, 3), volume: volByDate[date] || 0, cat: domOf(date), future: date > today });
       }
       weeks.push(week);
     }
     return weeks;
-  }, [strengthEntries]);
+  }, [strengthEntries, catOfAll]);
 
   const consistency = useMemo(() => {
     const today = todayISO(), thisWeek = weekStartISO(today);
@@ -2738,6 +2769,7 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState("portfolio");
   const [dockVisible, setDockVisible] = useState(false);
   const [feedOpen, setFeedOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   // While the feed is open, freeze the page behind it so touches scroll the feed (iPhone was scrolling the page underneath).
   useEffect(() => {
     if (!feedOpen) return undefined;
@@ -3165,7 +3197,7 @@ export default function Home() {
   }, [xpage, entriesByExercise, settings.bodyWeight, strictBwNames, sessionOfId]);
 
   // ---- Carousel: pull down at the top of Overall to see each lift's year-to-date change ----
-  const [carouselOpen, setCarouselOpen] = useState(false);
+  const [carouselOpen, setCarouselOpen] = useState(true);
   const carouselItems = useMemo(() => {
     const today = todayISO(), from = `${today.slice(0, 4)}-01-01`;
     const items = [];
@@ -3290,7 +3322,7 @@ export default function Home() {
     <DotField />
     <div className="wrap">
       <div className="status-fade" aria-hidden="true" />
-      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">{settings.look === "gta"
+      <div className="top-bar" style={feedOpen ? { display: "none" } : undefined}><button type="button" className="avatar-btn" onClick={() => setProfileOpen(true)} aria-label="Your profile">{settings.avatar ? <img src={settings.avatar} alt="" /> : String(settings.displayName || "").trim() ? String(settings.displayName).trim().charAt(0).toUpperCase() : <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4.2" /><path d="M3.5 21c0-4.6 3.8-7.5 8.5-7.5s8.5 2.9 8.5 7.5z" /></svg>}</button><button className="gear-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">{settings.look === "gta"
           ? <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M10.3 2h3.4l.5 2.6c.6.2 1.2.5 1.7.9l2.5-.9 1.7 2.9-2 1.7c.1.6.1 1.2 0 1.8l2 1.7-1.7 2.9-2.5-.9c-.5.4-1.1.7-1.7.9l-.5 2.6h-3.4l-.5-2.6c-.6-.2-1.2-.5-1.7-.9l-2.5.9-1.7-2.9 2-1.7a6 6 0 010-1.8l-2-1.7 1.7-2.9 2.5.9c.5-.4 1.1-.7 1.7-.9zM12 9a3 3 0 100 6 3 3 0 000-6z" /></svg>
           : <DotIcon rows={DOT_GEAR} color="currentColor" size={30} />}</button></div>
 
@@ -3675,7 +3707,7 @@ export default function Home() {
                   }
                 }}
               >
-                <SvgChart rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={(() => { const bi = bodyweightInfo(entriesByExercise[chartFocusExercise] || [], settings.bodyWeight); return bi.repsMode || (chartMetric === "reps" && bi.isBw) ? "reps" : unit; })()} />
+                <SvgChart gta={settings.look === "gta"} rows={chartResult.rows} series={chartResult.series} mode="exercise" metric={chartMetric} unit={(() => { const bi = bodyweightInfo(entriesByExercise[chartFocusExercise] || [], settings.bodyWeight); return bi.repsMode || (chartMetric === "reps" && bi.isBw) ? "reps" : unit; })()} />
               </div>
               {chartMetric === "e1rm" && <div className="chart-note">Est. 1RM uses the Epley formula, counting up to 10 reps.</div>}
             </div>
@@ -3720,20 +3752,20 @@ export default function Home() {
           <div className="label-sm" style={{ margin: "24px 0 12px" }}>Training overview</div>
           <div className="card">
             <CardHead title="Strength growth by category" />
-            <RadarChart gta={settings.look === "gta"} data={radarData} onTap={(id) => setOverview({ kind: "growth", range: "all", cat: id || null })} />
+            <RadarChart light={settingsLight} gta={settings.look === "gta"} data={radarData} onTap={(id) => setOverview({ kind: "growth", range: "all", cat: id || null })} />
             <button type="button" className="detail-link" onClick={() => setOverview({ kind: "growth", range: "all" })}>{allTimeRange ? `All time · ${fmtDate(allTimeRange.start)} – ${fmtDate(todayISO())}` : "All time"} · Details ›</button>
             <InfoFoot title="Strength growth by category" info="Average % change in estimated 1RM per workout, all time. Tap the chart for a breakdown by exercise." />
           </div>
           <div className="card">
             <CardHead title="Weekly training volume" />
-            <VolumeBarChart weeks={weeklyVolume} onTapBar={() => setOverview({ kind: "volume", range: "3m" })} gta={settings.look === "gta"} dots={(settings.dotNums !== false && settings.look !== "gta")} />
+            <VolumeBarChart catIds={catIdsAll} catColor={catColorFn} weeks={weeklyVolume} onTapBar={() => setOverview({ kind: "volume", range: "3m" })} gta={settings.look === "gta"} dots={(settings.dotNums !== false && settings.look !== "gta")} />
             <button type="button" className="detail-link" onClick={() => setOverview({ kind: "volume", range: "3m" })}>Last 10 weeks · Details ›</button>
             {(() => { const cur = weeklyVolume.find((w) => w.isCurrent); if (!cur || !(cur.volume > 0)) return null; const t = compareLine(cur.volume, "week" + cur.volume); return t ? <div className="compare-line">This week: {fmtNum(W(cur.volume))} {unit} moved. {t}</div> : null; })()}
             <InfoFoot title="Weekly training volume" info="Weight × sets × reps per week, Monday to Sunday, last 10 weeks. Tap the chart to split it by category and exercise." />
           </div>
           <div className="card">
             <CardHead title="Training consistency" />
-            <ConsistencyHeatmap weeks={heatmapWeeks} onTap={(d) => setOverview({ kind: "days", range: "3m", date: d || null })} gta={settings.look === "gta"} dots={(settings.dotNums !== false && settings.look !== "gta")} />
+            <ConsistencyHeatmap catColor={catColorFn} weeks={heatmapWeeks} onTap={(d) => setOverview({ kind: "days", range: "3m", date: d || null })} gta={settings.look === "gta"} dots={(settings.dotNums !== false && settings.look !== "gta")} />
             <button type="button" className="detail-link" onClick={() => setOverview({ kind: "days", range: "3m" })}>Last 10 weeks · Details ›</button>
             <InfoFoot title="Training consistency" info="Each column is a week (Monday to Sunday). A lit square means you trained that day. Tap a day to see what you did." />
             <div className="cons-stats">
@@ -4066,7 +4098,8 @@ export default function Home() {
         </div>
       )}
 
-      {feedOpen && <FeedPage />}
+      {feedOpen && <FeedPage gta={settings.look === "gta"} />}
+      {profileOpen && <ProfilePage own name={settings.displayName || ""} subtitle="Your profile" scene={settings.callingCard || "skyline"} photo={settings.avatar || ""} stats={myProfileStats} onClose={() => setProfileOpen(false)} onName={(v) => updateSettings({ displayName: v })} onPhoto={(v) => updateSettings({ avatar: v })} onChangeCard={() => { const i = SCENE_IDS.indexOf(settings.callingCard || "skyline"); updateSettings({ callingCard: SCENE_IDS[(i + 1) % SCENE_IDS.length] }); }} />}
       <div className="feed-fab-wrap"><button type="button" className={"feed-fab" + (feedOpen ? " on" : "")} aria-label="Social feed" aria-pressed={feedOpen} onClick={() => setFeedOpen((v) => !v)}><DotIcon rows={DOT_PEOPLE} color="currentColor" size={24} /><span>Feed</span></button></div>
 
       <div className="status-fade" aria-hidden="true" />
